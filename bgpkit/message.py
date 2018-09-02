@@ -502,7 +502,29 @@ class MultiprotocolUnreachableNLRI(PathAttribute):
         self.safi = SAFI(safi)
         self.nlri = list(nlri)
 
+    @property
+    def ip_routes(self):
+        if not self.ip_version:
+            return None
+        routes = []
+        for nlri in self.nlri:
+            routes.append(nlri_to_netaddr(nlri, version=self.ip_version))
+        return routes
+
+    @property
+    def ip_version(self):
+        if self.afi == AFI.AFI_IPV4:
+            return 4
+        elif self.afi == AFI.AFI_IPV6:
+            return 6
+        return None
+
     def __repr__(self):
+        if self.afi in {AFI.AFI_IPV4, AFI.AFI_IPV6}:
+            return "<MultiprotocolUnreachableNLRI afi={} safi={} "\
+                    "ip_routes={!r}".format(self.afi,
+                            self.safi,
+                            self.ip_routes)
         return "<MultiprotocolUnreachableNLRI afi={} safi={} "\
             "nlri={!r}>".format(self.afi,
                                 self.safi,
