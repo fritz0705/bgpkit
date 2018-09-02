@@ -33,7 +33,8 @@ class Session(object):
     def __init__(self, state=State.IDLE, local_router_id=None,
                  local_as=None, local_capabilities={}, peer_router_id=None,
                  peer_as=None, peer_capabilities={}, hold_time=0,
-                 local_protocols=[], peer_protocols=[]):
+                 local_protocols=[], peer_protocols=[],
+                 connect_retry_time=0, keepalive_time=0):
         self.state = state
         self.local_router_id = local_router_id
         self.local_as = local_as
@@ -44,13 +45,17 @@ class Session(object):
         self.peer_capabilities = set(peer_capabilities)
         self.peer_protocols = list(peer_protocols)
         self.hold_time = hold_time
+        self.connect_retry_time = connect_retry_time
+        self.keepalive_time = keepalive_time
+        self.last_error = None
 
     def __repr__(self):
         return "<Session state={!r} local_router_id={!r} local_as={!r} " \
             "local_capabilities={!r} local_protocols={!r} "\
             "peer_router_id={!r} peer_as={!r} peer_capabilities={!r}" \
             "peer_protocols={!r} common_capabilities={!r} " \
-            "common_protocols={!r} hold_time={!r}>".format(
+            "common_protocols={!r} hold_time={!r} " \
+            "last_error={!r}>".format(
                 self.state,
                 self.local_router_id,
                 self.local_as,
@@ -62,7 +67,8 @@ class Session(object):
                 self.peer_protocols,
                 self.common_capabilities,
                 self.common_protocols,
-                self.hold_time)
+                self.hold_time,
+                self.last_error)
 
     @property
     def common_capabilities(self):
@@ -85,6 +91,7 @@ class Session(object):
         for afi, safi in self.local_protocols:
             msg.parameters.append(bgpkit.message.MultiprotocolCapability(
                 afi, safi).as_param())
+        msg.hold_time = self.hold_time
         return msg
 
     def handle_message(self, msg):
@@ -95,22 +102,32 @@ class Session(object):
                 self.state = State.ESTABLISHED
         elif msg.type_ == bgpkit.message.MessageType.NOTIFICATION:
             self.state = State.IDLE
+            self.last_error = msg
+        elif msg.type_ == bgpkit.message.MessageType.UPDATE:
+            if self.state != State.ESTABLISHED:
+                self.state = State.IDLE
+                return [bgpkit.message.NotificationMessage()]
         return None
 
     def handle_open_message(self, msg):
         if self.state == State.ESTABLISHED:
-            # ILLEGAL
-            return None
+            self.state = State.IDLE
+            return [bgpkit.message.NotificationMessage()]
         elif self.state == State.OPEN_CONFIRM:
-            # ILLEGAL
-            return None
+            self.state = State.IDLE
+            return [bgpkit.message.NotificationMessage()]
         self.peer_protocols = []
         self.peer_capabilities = set()
-        self.peer_as = msg.asn
-        self.peer_router_id = msg.router_id
-        for parameter in msg.parameters:
-            if isinstance(parameter, bgpkit.message.CapabilityParameter):
-                self._handle_capability_parameter(parameter)
+        if self.peer_as is None:
+            self.peer_as = msg.asn
+        elif self.peer_as != msg.asn:
+            self.state = State.IDLE
+            return [bgpkit.message.NotificationMessage()]
+        if self.peer_router_id is None:
+            self.peer_router_id = msg.router_id
+        elif self.peer_router_id != msg.router_id:
+            self.state = State.IDLE
+            return [bgpkit.message.NotificationMessage()]
         for capability in msg.capabilities():
             if isinstance(capability, bgpkit.message.MultiprotocolCapability):
                 self.peer_protocols.append((capability.afi, capability.safi))
