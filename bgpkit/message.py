@@ -124,7 +124,7 @@ class OpenMessage(Message):
 
         opt_param_len = int.from_bytes(b[9:10], "big")
         b = b[10:]
-        while opt_param_len > 0:
+        while opt_param_len >= 2:
             param_type = int(b[0])
             param_length = int(b[1])
             param_cls = cls.parameter_types.get(param_type)
@@ -134,7 +134,6 @@ class OpenMessage(Message):
                                          **kwargs))
             opt_param_len -= 2 + param_length
             b = b[param_length+2:]
-            assert opt_param_len >= 0
 
         return msg
 
