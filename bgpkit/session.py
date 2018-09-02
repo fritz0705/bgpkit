@@ -71,12 +71,12 @@ class Session(object):
         if Capability.CAP_ASN4 in self.local_capabilities:
             msg.asn = AS_TRANS
             msg.parameters.append(bgpkit.message.FourOctetASNCapability(
-                self.local_as))
+                self.local_as).as_param())
         else:
             msg.asn = self.local_as
         for afi, safi in self.local_protocols:
             msg.parameters.append(bgpkit.message.MultiprotocolCapability(
-                afi, safi))
+                afi, safi).as_param())
         return msg
 
     def handle_message(self, msg):
@@ -88,6 +88,14 @@ class Session(object):
         elif msg.type_ == bgpkit.message.MessageType.NOTIFICATION:
             self.state = State.IDLE
         return None
+
+    def _handle_capability_parameter(self, param):
+        for cap in param.capabilities:
+            if isinstance(cap, bgpkit.message.FourOctetASNCapability):
+                self.peer_as = cap.asn
+                self.peer_capabilities.add(Capability.CAP_ASN4)
+            elif isinstance(cap, bgpkit.message.MultiprotocolCapability):
+                self.peer_protocols.append((cap.afi, cap.safi))
 
     def handle_open_message(self, msg):
         if self.state == State.ESTABLISHED:
@@ -101,11 +109,8 @@ class Session(object):
         self.peer_as = msg.asn
         self.peer_router_id = msg.router_id
         for parameter in msg.parameters:
-            if isinstance(parameter, bgpkit.message.FourOctetASNCapability):
-                self.peer_as = parameter.asn
-                self.peer_capabilities.add(Capability.CAP_ASN4)
-            elif isinstance(parameter, bgpkit.message.MultiprotocolCapability):
-                self.peer_protocols.append((parameter.afi, parameter.safi))
+            if isinstance(parameter, bgpkit.message.CapabilityParameter):
+                self._handle_capability_parameter(parameter)
         if self.state == State.CONNECT:
             self.state = State.OPEN_CONFIRM
             return [self.create_open_message(),

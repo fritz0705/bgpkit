@@ -56,7 +56,6 @@ class Message(object):
 
 class OpenMessage(Message):
     type_ = MessageType.OPEN
-    parameter_types = {}
 
     def __init__(self, version=4, asn=23456, hold_time=0, bgp_identifier=0,
                  router_id=None, parameters=[]):
@@ -105,14 +104,11 @@ class OpenMessage(Message):
     def _to_bytes_parameters(self):
         b = bytearray()
         for parameter in self.parameters:
-            b.extend(parameter.param_type.to_bytes(1, byteorder="big"))
-            param_b = parameter.to_bytes()
-            b.extend(len(param_b).to_bytes(1, byteorder="big"))
-            b.extend(param_b)
+            b.extend(parameter.to_bytes())
         return b
 
     @classmethod
-    def from_bytes(cls, b, **kwargs):
+    def from_bytes(cls, b, coerce=True, **kwargs):
         msg = Message.from_bytes(b)
         b = msg.payload
 
@@ -125,51 +121,102 @@ class OpenMessage(Message):
         opt_param_len = int.from_bytes(b[9:10], "big")
         b = b[10:]
         while opt_param_len >= 2:
-            param_type = int(b[0])
-            param_length = int(b[1])
-            param_cls = cls.parameter_types.get(param_type)
-            if param_cls is not None:
-                msg.parameters.append(
-                    param_cls.from_bytes(b[2:param_length + 2], coerce=True,
-                                         **kwargs))
-            opt_param_len -= 2 + param_length
-            b = b[param_length+2:]
+            param = Parameter.from_bytes(b, coerce=coerce, **kwargs)
+            param_len = len(param.to_bytes())
+            msg.parameters.append(param)
+            opt_param_len -= param_len
+            b = b[param_len:]
 
         return msg
+
+
+class Parameter(object):
+    parameter_types = {}
+
+    def __init__(self, param_type=0, payload=b""):
+        self.param_type = param_type
+        self.payload = bytes(payload)
+
+    def __repr__(self):
+        return "<Parameter param_type={!r} payload={!r}>".format(
+            self.param_type, self.payload)
+
+    def to_bytes(self):
+        b = bytearray()
+        b.append(self.param_type)
+        b.append(len(self.payload))
+        b.extend(self.payload)
+        return b
+
+    @classmethod
+    def from_bytes(cls, b, coerce=False, **kwargs):
+        param = cls(b[0])
+        param.payload = b[2:2 + b[1]]
+        if coerce:
+            if b[0] in cls.parameter_types:
+                return cls.parameter_types[b[0]].from_bytes(b, **kwargs)
+            pass
+        return param
+
+
+class CapabilityParameter(Parameter):
+    param_type = 2
+
+    def __init__(self, capabilities=[]):
+        self.capabilities = list(capabilities)
+
+    def __repr__(self):
+        return "<CapabilityParameter capabilities={!r}>".format(
+            self.capabilities)
+
+    @property
+    def payload(self):
+        b = bytearray()
+        for capability in self.capabilities:
+            b.extend(capability.to_bytes())
+        return b
+
+    @classmethod
+    def from_bytes(cls, b, coerce=False, **kwargs):
+        b = Parameter.from_bytes(b, **kwargs).payload
+        param = cls()
+        while len(b) >= 2:
+            cap = Capability.from_bytes(b, coerce=True)
+            param.capabilities.append(cap)
+            b = b[len(cap.to_bytes()):]
+        return param
+
+
+Parameter.parameter_types[2] = CapabilityParameter
 
 
 class Capability(object):
     capability_types = {}
 
-    param_type = 2
-
     def __init__(self, code, payload=b""):
-        self.code = int(code)
-        self.payload = bytes(payload)
+        self.code = code
+        self.payload = payload
+
+    def __repr__(self):
+        return "<Capability code={!r} payload={!r}>".format(
+            self.code, self.payload)
+
+    def as_param(self):
+        return CapabilityParameter([self])
 
     def to_bytes(self):
         b = bytearray()
-        b.extend(self.code.to_bytes(1, byteorder="big"))
-        if self.payload is not None:
-            b.extend(len(self.payload).to_bytes(1, byteorder="big"))
-            b.extend(self.payload)
+        b.append(self.code)
+        b.append(len(self.payload))
+        b.extend(self.payload)
         return b
-
-    def __repr__(self):
-        return "<Capability code={} payload={}>".format(
-            self.code, self.payload)
 
     @classmethod
     def from_bytes(cls, b, coerce=False, **kwargs):
-        cap = Capability(int(b[0]), b[2:])
         if coerce:
-            cap_cls = cls.capability_types.get(cap.code)
-            if cap_cls:
-                return cap_cls.from_bytes(b)
-        return cap
-
-
-OpenMessage.parameter_types[2] = Capability
+            if b[0] in cls.capability_types:
+                return cls.capability_types[b[0]].from_bytes(b, **kwargs)
+        return cls(b[0], b[2:2 + b[1]])
 
 
 class FourOctetASNCapability(Capability):
@@ -187,8 +234,8 @@ class FourOctetASNCapability(Capability):
 
     @classmethod
     def from_bytes(cls, b, **kwargs):
-        cap = super().from_bytes(b)
-        return cls(int.from_bytes(cap.payload[0:4], byteorder="big"))
+        b = Capability.from_bytes(b).payload
+        return cls(int.from_bytes(b[0:4], byteorder="big"))
 
 
 Capability.capability_types[65] = FourOctetASNCapability
@@ -232,9 +279,21 @@ class MultiprotocolCapability(Capability):
         self.safi = safi
 
     @property
+    def safi_value(self):
+        if isinstance(self.safi, SAFI):
+            return self.safi.value
+        return self.safi
+
+    @property
+    def afi_value(self):
+        if isinstance(self.afi, AFI):
+            return self.afi.value
+        return self.afi
+
+    @property
     def payload(self):
-        return self.afi.value.to_bytes(2, byteorder="big") + b"\0" + \
-            self.safi.value.to_bytes(1, byteorder="big")
+        return self.afi_value.to_bytes(2, byteorder="big") + b"\0" + \
+            self.safi_value.to_bytes(1, byteorder="big")
 
     def __repr__(self):
         return "<MultiprotocolCapability afi={} safi={}>".format(
@@ -242,10 +301,10 @@ class MultiprotocolCapability(Capability):
 
     @classmethod
     def from_bytes(cls, b, **kwargs):
-        cap = super().from_bytes(b)
+        b = Capability.from_bytes(b).payload
         return cls(
-            int.from_bytes(cap.payload[0:2], byteorder="big"),
-            int.from_bytes(cap.payload[3:4], byteorder="big"))
+            int.from_bytes(b[0:2], byteorder="big"),
+            int.from_bytes(b[3:4], byteorder="big"))
 
 
 Capability.capability_types[1] = MultiprotocolCapability
