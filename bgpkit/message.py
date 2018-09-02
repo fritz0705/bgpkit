@@ -211,12 +211,24 @@ class AFI(enum.Enum):
 class SAFI(enum.Enum):
     SAFI_UNICAST = 1
     SAFI_MULTICAST = 2
+    SAFI_BGP_LS = 71
+    SAFI_FLOW4 = 133
 
 
 class MultiprotocolCapability(Capability):
     code = 1
 
     def __init__(self, afi, safi):
+        if isinstance(afi, int):
+            try:
+                afi = AFI(afi)
+            except ValueError:
+                pass
+        if isinstance(safi, int):
+            try:
+                safi = SAFI(safi)
+            except ValueError:
+                pass
         self.afi = afi
         self.safi = safi
 
@@ -328,14 +340,54 @@ class PathAttribute(object):
 class MultiprotocolReachableNLRI(PathAttribute):
     type_code = 14
 
-    def __init__(self, afi, safi, next_hop, nlri=[], flags=0):
+    def __init__(self, afi, safi, next_hop, nlri=[],
+                 flags=PathAttribute.FLAG_OPTIONAL):
         self.flags = flags
         self.afi = afi
         self.safi = safi
         self.next_hop = next_hop
         self.nlri = list(nlri)
 
+    @property
+    def ip_routes(self):
+        if not self.ip_version:
+            return None
+        routes = []
+        for nlri in self.nlri:
+            routes.append(nlri_to_netaddr(nlri, version=self.ip_version))
+        return routes
+
+    @ip_routes.setter
+    def ip_routes(self, routes):
+        pass
+
+    @property
+    def ip_version(self):
+        if self.afi == AFI.AFI_IPV4:
+            return 4
+        elif self.afi == AFI.AFI_IPV6:
+            return 6
+        return None
+
+    @property
+    def ip_next_hop(self):
+        if not self.ip_version:
+            return None
+        return netaddr.IPAddress(
+            int.from_bytes(self.next_hop,
+                           byteorder="big"), version=self.ip_version)
+
+    @ip_next_hop.setter
+    def ip_next_hop(self, next_hop):
+        pass
+
     def __repr__(self):
+        if self.afi in {AFI.AFI_IPV4, AFI.AFI_IPV6}:
+            return "<MultiprotocolReachableNLRI afi={} safi={} "\
+                "ip_next_hop={!r} ip_routes={!r}>".format(self.afi,
+                                                          self.safi,
+                                                          self.ip_next_hop,
+                                                          self.ip_routes)
         return "<MultiprotocolReachableNLRI afi={} safi={} next_hop={!r} " \
             "nlri={!r}>".format(self.afi,
                                 self.safi,
@@ -366,8 +418,8 @@ class MultiprotocolReachableNLRI(PathAttribute):
         attr = cls(AFI(afi), SAFI(safi), next_hop, flags=attr.flags)
         while nlri_b:
             n_len = nlri_b[0]
-            attr.nlri.append((n_len, nlri_b[1:1 + (n_len >> 3)]))
-            nlri_b = nlri_b[1 + (n_len >> 3):]
+            attr.nlri.append((n_len, nlri_b[1:1 + nlri_octets(n_len)]))
+            nlri_b = nlri_b[1 + nlri_octets(n_len):]
         return attr
 
 
@@ -407,8 +459,8 @@ class MultiprotocolUnreachableNLRI(PathAttribute):
         nlri_b = b[3:]
         while nlri_b:
             n_len = nlri_b[0]
-            attr.nlri.append((n_len, nlri_b[1:1 + (n_len >> 3)]))
-            nlri_b = nlri_b[1 + (n_len >> 3):]
+            attr.nlri.append((n_len, nlri_b[1:1 + nlri_octets(n_len)]))
+            nlri_b = nlri_b[1 + nlri_octets(n_len):]
         return attr
 
 
@@ -704,6 +756,17 @@ class LargeCommunitiesAttribute(PathAttribute):
 PathAttribute.attribute_types[32] = LargeCommunitiesAttribute
 
 
+def nlri_to_netaddr(nlri, version=4):
+    prefix = nlri[0]
+    addr = nlri[1].ljust(4 if version == 4 else 16, b'\0')
+    return netaddr.IPNetwork((int.from_bytes(addr, byteorder="big"), prefix),
+                             version=version)
+
+
+def nlri_octets(prefix):
+    return ((prefix - 1) >> 3) + 1
+
+
 class UpdateMessage(Message):
     type_ = MessageType.UPDATE
 
@@ -713,17 +776,31 @@ class UpdateMessage(Message):
         self.nlri = list(nlri)
 
     @property
-    def withdrawn_routes(self):
+    def ip_nlri(self):
+        networks = []
+        for nlri in self.nlri:
+            networks.append(nlri_to_netaddr(nlri))
+        return networks
+
+    @ip_nlri.setter
+    def ip_nlri(self, nlri):
         pass
 
     @property
-    def nlri_routes(self):
+    def ip_withdrawn(self):
+        networks = []
+        for withdrawn in self.withdrawn:
+            networks.append(nlri_to_netaddr(withdrawn))
+        return networks
+
+    @ip_withdrawn.setter
+    def ip_withdrawn(withdrawn):
         pass
 
     def __repr__(self):
-        return "<UpdateMessage withdrawn={self.withdrawn!r} " \
+        return "<UpdateMessage ip_withdrawn={self.ip_withdrawn!r} " \
             "attributes={self.path_attributes!r} " \
-            "nlri={self.nlri!r}>".format(self=self)
+            "ip_nlri={self.ip_nlri!r}>".format(self=self)
 
     def _to_bytes_withdrawn(self):
         return b""
@@ -763,8 +840,9 @@ class UpdateMessage(Message):
 
         while withdrawn_b:
             w_len = withdrawn_b[0]
-            msg.withdrawn.append((w_len, withdrawn_b[1:1 + (w_len >> 3)]))
-            withdrawn_b = withdrawn_b[1 + (w_len >> 3):]
+            msg.withdrawn.append((w_len,
+                                  withdrawn_b[1:1 + nlri_octets(w_len)]))
+            withdrawn_b = withdrawn_b[1 + nlri_octets(w_len):]
         while path_attrs_b:
             attr1 = PathAttribute.from_bytes(path_attrs_b,
                                              asn4=asn4,
@@ -777,8 +855,8 @@ class UpdateMessage(Message):
             path_attrs_b = path_attrs_b[attr1.length:]
         while nlri_b:
             n_len = nlri_b[0]
-            msg.nlri.append((n_len, nlri_b[1:1 + (n_len >> 3)]))
-            nlri_b = nlri_b[1 + (n_len >> 3):]
+            msg.nlri.append((n_len, nlri_b[1:1 + nlri_octets(n_len)]))
+            nlri_b = nlri_b[1 + nlri_octets(n_len):]
 
         return msg
 
