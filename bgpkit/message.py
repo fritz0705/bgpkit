@@ -305,6 +305,9 @@ class PathAttribute(object):
 
     def to_bytes(self):
         b = bytearray()
+        payload = self.payload
+        if len(payload) > 255:
+            self.extended_length = True
         b.append(self.flags)
         b.append(self.type_code)
         if self.extended_length:
