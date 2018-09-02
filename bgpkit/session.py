@@ -17,8 +17,16 @@ class State(enum.Enum):
 
 
 class Capability(enum.Enum):
-    CAP_ASN4 = 1
-    CAP_BGPSEC = 2
+    ASN4 = 1
+    MP = 2
+    BGPSEC = 3
+
+    @classmethod
+    def from_capability_msg(cls, cap):
+        if isinstance(cap, bgpkit.message.FourOctetASNCapability):
+            return cls.ASN4
+        elif isinstance(cap, bgpkit.message.MultiprotocolCapability):
+            return cls.MP
 
 
 class Session(object):
@@ -68,7 +76,7 @@ class Session(object):
         msg = bgpkit.message.OpenMessage()
         if self.local_router_id is not None:
             msg.router_id = self.local_router_id
-        if Capability.CAP_ASN4 in self.local_capabilities:
+        if Capability.ASN4 in self.local_capabilities:
             msg.asn = AS_TRANS
             msg.parameters.append(bgpkit.message.FourOctetASNCapability(
                 self.local_as).as_param())
@@ -89,14 +97,6 @@ class Session(object):
             self.state = State.IDLE
         return None
 
-    def _handle_capability_parameter(self, param):
-        for cap in param.capabilities:
-            if isinstance(cap, bgpkit.message.FourOctetASNCapability):
-                self.peer_as = cap.asn
-                self.peer_capabilities.add(Capability.CAP_ASN4)
-            elif isinstance(cap, bgpkit.message.MultiprotocolCapability):
-                self.peer_protocols.append((cap.afi, cap.safi))
-
     def handle_open_message(self, msg):
         if self.state == State.ESTABLISHED:
             # ILLEGAL
@@ -111,6 +111,12 @@ class Session(object):
         for parameter in msg.parameters:
             if isinstance(parameter, bgpkit.message.CapabilityParameter):
                 self._handle_capability_parameter(parameter)
+        for capability in msg.capabilities():
+            if isinstance(capability, bgpkit.message.MultiprotocolCapability):
+                self.peer_protocols.append((capability.afi, capability.safi))
+            capability = Capability.from_capability_msg(capability)
+            if capability:
+                self.peer_capabilities.add(capability)
         if self.state == State.CONNECT:
             self.state = State.OPEN_CONFIRM
             return [self.create_open_message(),
@@ -122,7 +128,7 @@ class Session(object):
     def parse_message(self, msg):
         msg = bgpkit.message.Message.from_bytes(
             msg, coerce=True,
-            asn4=Capability.CAP_ASN4 in self.common_capabilities)
+            asn4=Capability.ASN4 in self.common_capabilities)
         return msg
 
     @classmethod
