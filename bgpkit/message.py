@@ -87,7 +87,8 @@ class OpenMessage(Message):
     def __repr__(self):
         return "<OpenMessage version={self.version!r} asn={self.asn!r} " \
             "hold_time={self.hold_time!r} "\
-            "router_id={self.router_id!r}>".format(self=self)
+            "router_id={self.router_id!r} "\
+            "parameters={self.parameters!r}>".format(self=self)
 
     @property
     def payload(self):
