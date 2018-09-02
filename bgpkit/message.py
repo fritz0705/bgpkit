@@ -910,6 +910,9 @@ def nlri_to_netaddr(nlri, version=4):
     return netaddr.IPNetwork((int.from_bytes(addr, byteorder="big"), prefix),
                              version=version)
 
+def netaddr_to_nlri(network):
+    return (network.prefixlen, network.packed[:nlri_octets(network.prefixlen)])
+
 
 def nlri_octets(prefix):
     return ((prefix - 1) >> 3) + 1
@@ -951,7 +954,11 @@ class UpdateMessage(Message):
             "ip_nlri={self.ip_nlri!r}>".format(self=self)
 
     def _to_bytes_withdrawn(self):
-        return b""
+        b = bytearray()
+        for withdrawn in self.withdrawn:
+            b.append(withdrawn[0])
+            b.extend(withdrawn[1])
+        return b
 
     def _to_bytes_path_attrs(self):
         b = bytearray()
@@ -960,7 +967,11 @@ class UpdateMessage(Message):
         return b
 
     def _to_bytes_nlri(self):
-        return b""
+        b = bytearray()
+        for nlri in self.nlri:
+            b.append(nlri[0])
+            b.extend(nlri[1])
+        return b
 
     @property
     def payload(self):
