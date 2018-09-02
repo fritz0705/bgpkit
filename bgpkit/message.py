@@ -83,6 +83,12 @@ class OpenMessage(Message):
     def router_id(self, val):
         self.bgp_identifier = int(val)
 
+    def capabilities(self):
+        for param in self.parameters:
+            if not isinstance(param, CapabilityParameter):
+                continue
+            yield from param.capabilities
+
     def __repr__(self):
         return "<OpenMessage version={self.version!r} asn={self.asn!r} " \
             "hold_time={self.hold_time!r} "\
