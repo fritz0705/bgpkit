@@ -252,6 +252,11 @@ Capability.capability_types[1] = MultiprotocolCapability
 
 
 class PathAttribute(object):
+    FLAG_EXTENDED_LENGTH = 16
+    FLAG_PARTIAL = 32
+    FLAG_TRANSITIVE = 64
+    FLAG_OPTIONAL = 128
+
     attribute_types = {}
 
     type_code = 0
@@ -264,35 +269,35 @@ class PathAttribute(object):
 
     @property
     def is_partial(self):
-        return self.flags & 32
+        return self.flags & self.FLAG_PARTIAL
 
     @is_partial.setter
     def is_partial(self, b):
-        pass
+        self.flags ^= self.flags & self.FLAG_PARTIAL * (not b)
 
     @property
     def is_transitive(self):
-        return self.flags & 64
+        return self.flags & self.FLAG_TRANSITIVE
 
     @is_transitive.setter
     def is_transitive(self, b):
-        pass
+        self.flags ^= self.flags & self.FLAG_TRANSITIVE * (not b)
 
     @property
     def is_optional(self):
-        return self.flags & 128
+        return self.flags & self.FLAG_OPTIONAL
 
     @is_optional.setter
     def is_optional(self, b):
-        pass
+        self.flags ^= self.flags & self.FLAG_OPTIONAL * (not b)
 
     @property
     def extended_length(self):
-        return self.flags & 16
+        return self.flags & self.FLAG_EXTENDED_LENGTH
 
     @extended_length.setter
     def extended_length(self, b):
-        pass
+        self.flags ^= self.flags & self.FLAG_EXTENDED_LENGTH * (not b)
 
     @property
     def length(self):
@@ -428,7 +433,8 @@ PathAttribute.attribute_types[14] = MultiprotocolReachableNLRI
 class MultiprotocolUnreachableNLRI(PathAttribute):
     type_code = 15
 
-    def __init__(self, afi, safi, nlri=[], flags=0):
+    def __init__(self, afi, safi, nlri=[],
+                 flags=PathAttribute.FLAG_OPTIONAL):
         self.flags = flags
         self.afi = AFI(afi)
         self.safi = SAFI(safi)
@@ -469,7 +475,7 @@ PathAttribute.attribute_types[15] = MultiprotocolUnreachableNLRI
 class OriginAttribute(PathAttribute):
     type_code = 1
 
-    def __init__(self, origin, flags=0):
+    def __init__(self, origin, flags=PathAttribute.FLAG_TRANSITIVE):
         self.origin = origin
         self.flags = flags
 
@@ -514,7 +520,8 @@ class ASPathSegmentType(enum.Enum):
 class ASPathAttribute(PathAttribute):
     type_code = 2
 
-    def __init__(self, segments=[], asn4=False, flags=0):
+    def __init__(self, segments=[], asn4=False,
+                 flags=PathAttribute.FLAG_TRANSITIVE):
         self.segments = list(segments)
         self.asn4 = asn4
         self.flags = flags
@@ -568,7 +575,7 @@ PathAttribute.attribute_types[2] = ASPathAttribute
 class NextHopAttribute(PathAttribute):
     type_code = 3
 
-    def __init__(self, next_hop, flags=0):
+    def __init__(self, next_hop, flags=PathAttribute.FLAG_TRANSITIVE):
         self.next_hop = next_hop
         self.flags = flags
 
@@ -591,7 +598,7 @@ PathAttribute.attribute_types[3] = NextHopAttribute
 class MultiExitDisc(PathAttribute):
     type_code = 4
 
-    def __init__(self, med, flags=0):
+    def __init__(self, med, flags=PathAttribute.FLAG_OPTIONAL):
         self.med = med
         self.flags = flags
 
@@ -615,7 +622,7 @@ PathAttribute.attribute_types[4] = MultiExitDisc
 class LocalPrefAttribute(PathAttribute):
     type_code = 5
 
-    def __init__(self, local_pref, flags=0):
+    def __init__(self, local_pref, flags=PathAttribute.FLAG_TRANSITIVE):
         self.local_pref = local_pref
         self.flags = flags
 
@@ -639,6 +646,9 @@ PathAttribute.attribute_types[5] = LocalPrefAttribute
 class AtomicAggregateAttribute(PathAttribute):
     type_code = 6
 
+    def __init__(self, flags=PathAttribute.FLAG_TRANSITIVE):
+        self.flags = flags
+
     @property
     def payload(self):
         return b""
@@ -658,7 +668,9 @@ PathAttribute.attribute_types[6] = AtomicAggregateAttribute
 class AggregatorAttribute(PathAttribute):
     type_code = 7
 
-    def __init__(self, asn, ip_address, asn4=False, flags=None):
+    def __init__(self, asn, ip_address, asn4=False,
+                 flags=PathAttribute.FLAG_OPTIONAL |
+                 PathAttribute.FLAG_TRANSITIVE):
         self.asn = asn
         self.ip_address = ip_address
         self.asn4 = asn4
@@ -697,7 +709,9 @@ PathAttribute.attribute_types[7] = AggregatorAttribute
 class CommunitiesAttribute(PathAttribute):
     type_code = 8
 
-    def __init__(self, communities=[], flags=0):
+    def __init__(self, communities=[],
+                 flags=PathAttribute.FLAG_TRANSITIVE |
+                 PathAttribute.FLAG_OPTIONAL):
         self.communities = list(communities)
         self.flags = flags
 
@@ -740,7 +754,9 @@ PathAttribute.attribute_types[16] = ExtendedCommunitiesAttribute
 class LargeCommunitiesAttribute(PathAttribute):
     type_code = 32
 
-    def __init__(self, communities=[], flags=0):
+    def __init__(self, communities=[],
+                 flags=PathAttribute.FLAG_OPTIONAL |
+                 PathAttribute.FLAG_TRANSITIVE):
         self.communities = list(communities)
         self.flags = flags
 
