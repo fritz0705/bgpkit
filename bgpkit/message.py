@@ -722,6 +722,13 @@ class CommunitiesAttribute(PathAttribute):
         return "<CommunitiesAttribute {!r}>".format(
             self.communities)
 
+    @property
+    def payload(self):
+        b = bytearray()
+        for community in self.communities:
+            b.append(community.to_bytes(4, byteorder="big"))
+        return b
+
     @classmethod
     def from_bytes(cls, b, **kwargs):
         attr = PathAttribute.from_bytes(b)
@@ -739,12 +746,18 @@ PathAttribute.attribute_types[8] = CommunitiesAttribute
 class ExtendedCommunitiesAttribute(PathAttribute):
     type_code = 16
 
-    def __init__(self, communities=[], flags=0):
+    def __init__(self, communities=[],
+                 flags=PathAttribute.FLAG_OPTIONAL |
+                 PathAttribute.FLAG_TRANSITIVE):
         self.communities = list(communities)
         self.flags = flags
 
     def __repr__(self):
         return "<ExtendedCommunitiesAttribute {!r}>".format(self.communities)
+
+    @property
+    def payload(self):
+        pass
 
     @classmethod
     def from_bytes(cls, b, **kwargs):
@@ -766,9 +779,27 @@ class LargeCommunitiesAttribute(PathAttribute):
     def __repr__(self):
         return "<LargeCommunitiesAttribute {!r}>".format(self.communities)
 
+    @property
+    def payload(self):
+        b = bytearray()
+        for global_admin, local_1, local_2 in self.communities:
+            b.extend(global_admin.to_bytes(4, byteorder="big"))
+            b.extend(local_1.to_bytes(4, byteorder="big"))
+            b.extend(local_2.to_bytes(4, byteorder="big"))
+        return b
+
     @classmethod
     def from_bytes(cls, b, **kwargs):
-        pass
+        attr = PathAttribute.from_bytes(b)
+        b = attr.payload
+        attr = cls(flags=attr.flags)
+        while len(b) >= 12:
+            global_admin = int.from_bytes(b[0:4], byteorder="big")
+            local_1 = int.from_bytes(b[4:8], byteorder="big")
+            local_2 = int.from_bytes(b[8:12], byteorder="big")
+            attr.communities.append((global_admin, local_1, local_2))
+            b = b[12:]
+        return attr
 
 
 PathAttribute.attribute_types[32] = LargeCommunitiesAttribute
