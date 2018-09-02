@@ -806,8 +806,20 @@ class CommunitiesAttribute(PathAttribute):
         self.flags = flags
 
     def __repr__(self):
-        return "<CommunitiesAttribute {!r}>".format(
-            self.communities)
+        return "<CommunitiesAttribute {!r}>".format(self.pairs)
+
+    @property
+    def pairs(self):
+        c = []
+        for community in self.communities:
+            c.append((community >> 16, community & 0xffff))
+        return c
+
+    @pairs.setter
+    def pairs(self, pairs):
+        self.communities = []
+        for pair in pairs:
+            self.communities.append(pair[0] << 16 | pair[1])
 
     @property
     def payload(self):
