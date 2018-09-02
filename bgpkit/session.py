@@ -147,13 +147,3 @@ class Session(object):
             msg, coerce=True,
             asn4=Capability.ASN4 in self.common_capabilities)
         return msg
-
-    @classmethod
-    def from_open_message(self, msg, local_router_id=None, local_as=None):
-        if not isinstance(msg, bgpkit.message.OpenMessage):
-            raise ValueError("Expected OpenMessage, got {!r} in "
-                             "positional argument 0".format(type(msg)))
-        if local_router_id is None:
-            local_router_id = msg.router_id + 1
-        if local_as is None:
-            local_as = msg.asn
