@@ -1,6 +1,11 @@
 # coding: utf-8
 
+from abc import ABC, abstractmethod
+import asyncio
 import enum
+from typing import *
+
+import netaddr
 
 import bgpkit.message
 
@@ -16,134 +21,156 @@ class State(enum.Enum):
     ESTABLISHED = 6
 
 
-class Capability(enum.Enum):
-    ASN4 = 1
-    MP = 2
-    BGPSEC = 3
-
-    @classmethod
-    def from_capability_msg(cls, cap):
-        if isinstance(cap, bgpkit.message.FourOctetASNCapability):
-            return cls.ASN4
-        elif isinstance(cap, bgpkit.message.MultiprotocolCapability):
-            return cls.MP
+ProtocolTuple = Tuple[bgpkit.message.AFI, bgpkit.message.SAFI]
 
 
-class Session(object):
-    def __init__(self, state=State.IDLE, local_router_id=None,
-                 local_as=None, local_capabilities={}, peer_router_id=None,
-                 peer_as=None, peer_capabilities={}, hold_time=0,
-                 local_protocols=[], peer_protocols=[],
-                 connect_retry_time=0, keepalive_time=0):
+class BaseSession(ABC):
+    state: State
+    local_router_id: Optional[netaddr.IPAddress]
+    local_as: Optional[int]
+    local_capabilities: Set[bgpkit.message.Capability]
+    peer_router_id: Optional[netaddr.IPAddress]
+    peer_as: Optional[int]
+    peer_capabilities: Set[bgpkit.message.Capability]
+    hold_time: int
+    connect_retry_time: int
+    keepalive_time: int
+    decoder: bgpkit.message.MessageDecoder
+
+    def __init__(self, state: State=State.IDLE,
+                 local_router_id: Optional[netaddr.IPAddress]=None,
+                 local_as: Optional[int]=None,
+                 local_capabilities: Set[bgpkit.message.Capability]=set(),
+                 peer_router_id: Optional[netaddr.IPAddress]=None,
+                 peer_as: Optional[int]=None,
+                 peer_capabilities: Set[bgpkit.message.Capability]=set(),
+                 hold_time: int=0,
+                 connect_retry_time: int=0,
+                 keepalive_time: int=0,
+                 decoder: Optional[bgpkit.message.MessageDecoder]=None) \
+            -> None:
         self.state = state
         self.local_router_id = local_router_id
         self.local_as = local_as
         self.local_capabilities = set(local_capabilities)
-        self.local_protocols = list(local_protocols)
         self.peer_router_id = peer_router_id
         self.peer_as = peer_as
         self.peer_capabilities = set(peer_capabilities)
-        self.peer_protocols = list(peer_protocols)
         self.hold_time = hold_time
         self.connect_retry_time = connect_retry_time
         self.keepalive_time = keepalive_time
         self.last_error = None
+        if decoder is None:
+            decoder = bgpkit.message.MessageDecoder(
+                bgpkit.message.defaultDecoder)
+        self.decoder = decoder
 
-    def __repr__(self):
-        return "<Session state={!r} local_router_id={!r} local_as={!r} " \
-            "local_capabilities={!r} local_protocols={!r} "\
-            "peer_router_id={!r} peer_as={!r} peer_capabilities={!r}" \
-            "peer_protocols={!r} common_capabilities={!r} " \
-            "common_protocols={!r} hold_time={!r} " \
-            "last_error={!r}>".format(
-                self.state,
-                self.local_router_id,
-                self.local_as,
-                self.local_capabilities,
-                self.local_protocols,
-                self.peer_router_id,
-                self.peer_as,
-                self.peer_capabilities,
-                self.peer_protocols,
-                self.common_capabilities,
-                self.common_protocols,
-                self.hold_time,
-                self.last_error)
+    def copy(self, _cls=None, _args={}):
+        if _cls is None:
+            _cls = self.__class__
+        return _cls(state=self.state, local_router_id=self.local_router_id,
+                    local_as=self.local_as,
+                    local_capabilities=self.local_capabilities,
+                    peer_router_id=self.peer_router_id, peer_as=self.peer_as,
+                    peer_capabilities=self.peer_capabilities,
+                    hold_time=self.hold_time,
+                    connect_retry_time=self.connect_retry_time,
+                    keepalive_time=self.keepalive_time,
+                    decoder=self.decoder, **_args)
+
+    @abstractmethod
+    def make_open_message(self) -> bgpkit.message.OpenMessage: ...
+
+    @abstractmethod
+    def decode_message(self, b: ByteString) -> bgpkit.message.Message: ...
+
+    def __repr__(self) -> str:
+        return f"<{self.__class__.__name__} state={self.state!r} " \
+            f"local_router_id={self.local_router_id!r} " \
+            f"local_as={self.local_as!r} " \
+            f"local_capabilities={self.local_capabilities!r} " \
+            f"peer_router_id={self.peer_router_id!r} " \
+            f"peer_as={self.peer_as!r} " \
+            f"peer_capabilities={self.peer_capabilities!r} " \
+            f"hold_time={self.hold_time!r} " \
+            f"keepalive_time={self.keepalive_time!r} " \
+            f"connect_retry_time={self.connect_retry_time!r} " \
+            f"last_error={self.last_error!r}>"
+
+
+class Session(BaseSession):
+    @property
+    def supports_asn4(self) -> bool:
+        if self.peer_as is None:
+            return self.local_supports_asn4
+        return self.peer_supports_asn4 and self.local_supports_asn4
 
     @property
-    def common_capabilities(self):
-        return self.local_capabilities & self.peer_capabilities
+    def local_supports_asn4(self) -> bool:
+        for capability in self.local_capabilities:
+            if isinstance(capability, bgpkit.message.FourOctetASNCapability):
+                return True
+        return False
 
     @property
-    def common_protocols(self):
-        return set(self.local_protocols) & set(self.peer_protocols)
+    def peer_supports_asn4(self) -> bool:
+        for capability in self.peer_capabilities:
+            if isinstance(capability, bgpkit.message.FourOctetASNCapability):
+                return True
+        return False
 
-    def create_open_message(self):
+    @property
+    def local_protocols(self) -> Set[ProtocolTuple]:
+        protos = set()
+        for capability in self.local_capabilities:
+            if isinstance(capability, bgpkit.message.MultiprotocolCapability):
+                protos.add((capability.afi, capability.safi))
+        return protos
+
+    @property
+    def peer_protocols(self) -> Set[ProtocolTuple]:
+        protos = set()
+        for capability in self.local_capabilities:
+            if isinstance(capability, bgpkit.message.MultiprotocolCapability):
+                protos.add((capability.afi, capability.safi))
+        return protos
+
+    def load_peer_data(self, msg: bgpkit.message.OpenMessage) -> None:
+        self.peer_capabilities = set(msg.capabilities())
+        self.peer_router_id = msg.router_id
+        self.peer_as = msg.asn
+        if self.supports_asn4:
+            for capability in self.peer_capabilities:
+                if isinstance(capability,
+                              bgpkit.message.FourOctetASNCapability):
+                    self.peer_as = capability.asn
+            if bgpkit.message.ASPathAttribute in self.decoder:
+                self.decoder.register_path_attribute_type(
+                    bgpkit.message.AS4PathAttribute)
+        else:
+            if bgpkit.message.ASPathAttribute in self.decoder:
+                self.decoder.register_path_attribute_type(
+                    bgpkit.message.ASPathAttribute)
+
+    def decode_message(self, _b: bytes) -> bgpkit.message.Message:
+        return self.decoder.decode_message(_b)
+
+    def make_open_message(self) -> bgpkit.message.OpenMessage:
         msg = bgpkit.message.OpenMessage()
         if self.local_router_id is not None:
             msg.router_id = self.local_router_id
-        if Capability.ASN4 in self.local_capabilities:
-            msg.asn = AS_TRANS
-            msg.parameters.append(bgpkit.message.FourOctetASNCapability(
-                self.local_as).as_param())
-        else:
+        if not self.supports_asn4 and self.local_as is not None:
             msg.asn = self.local_as
-        for afi, safi in self.local_protocols:
-            msg.parameters.append(bgpkit.message.MultiprotocolCapability(
-                afi, safi).as_param())
+        else:
+            msg.asn = AS_TRANS
         msg.hold_time = self.hold_time
+        for capability in self.local_capabilities:
+            msg.parameters.append(capability.as_param())
         return msg
 
-    def handle_message(self, msg):
-        if msg.type_ == bgpkit.message.MessageType.OPEN:
-            return self.handle_open_message(msg)
-        elif msg.type_ == bgpkit.message.MessageType.KEEPALIVE:
-            if self.state == State.OPEN_CONFIRM:
-                self.state = State.ESTABLISHED
-        elif msg.type_ == bgpkit.message.MessageType.NOTIFICATION:
-            self.state = State.IDLE
-            self.last_error = msg
-        elif msg.type_ == bgpkit.message.MessageType.UPDATE:
-            if self.state != State.ESTABLISHED:
-                self.state = State.IDLE
-                return [bgpkit.message.NotificationMessage()]
-        return None
 
-    def handle_open_message(self, msg):
-        if self.state == State.ESTABLISHED:
-            self.state = State.IDLE
-            return [bgpkit.message.NotificationMessage()]
-        elif self.state == State.OPEN_CONFIRM:
-            self.state = State.IDLE
-            return [bgpkit.message.NotificationMessage()]
-        self.peer_protocols = []
-        self.peer_capabilities = set()
-        if self.peer_as is None:
-            self.peer_as = msg.asn
-        elif self.peer_as != msg.asn:
-            self.state = State.IDLE
-            return [bgpkit.message.NotificationMessage()]
-        if self.peer_router_id is None:
-            self.peer_router_id = msg.router_id
-        elif self.peer_router_id != msg.router_id:
-            self.state = State.IDLE
-            return [bgpkit.message.NotificationMessage()]
-        for capability in msg.capabilities():
-            if isinstance(capability, bgpkit.message.MultiprotocolCapability):
-                self.peer_protocols.append((capability.afi, capability.safi))
-            capability = Capability.from_capability_msg(capability)
-            if capability:
-                self.peer_capabilities.add(capability)
-        if self.state == State.CONNECT:
-            self.state = State.OPEN_CONFIRM
-            return [self.create_open_message(),
-                    bgpkit.message.KeepaliveMessage()]
-        elif self.state == State.OPEN_SENT:
-            self.state = State.OPEN_CONFIRM
-            return [bgpkit.message.KeepaliveMessage()]
-
-    def parse_message(self, msg):
-        msg = bgpkit.message.Message.from_bytes(
-            msg, coerce=True,
-            asn4=Capability.ASN4 in self.common_capabilities)
-        return msg
+__all__ = (
+    "AS_TRANS",
+    "BaseSession",
+    "State"
+)
