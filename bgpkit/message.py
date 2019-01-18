@@ -173,7 +173,6 @@ class OpenMessage(Message):
         return msg
 
 
-
 class Parameter(object):
     type_: int
     payload: bytes
@@ -390,7 +389,6 @@ class MultiprotocolCapability(Capability):
             int.from_bytes(b[3:4], byteorder="big"))
 
 
-
 class PathAttribute(object):
     FLAG_EXTENDED_LENGTH = 16
     FLAG_PARTIAL = 32
@@ -488,8 +486,8 @@ class MultiprotocolReachableNLRI(PathAttribute):
     nlri: List[NLRI]
 
     def __init__(self, afi: int, safi: int, next_hop: bytes,
-            nlri: List[NLRI]=[],
-            flags: int=PathAttribute.FLAG_OPTIONAL) -> None:
+                 nlri: List[NLRI]=[],
+                 flags: int=PathAttribute.FLAG_OPTIONAL) -> None:
         self.flags = flags
         self.afi = AFI(afi)
         self.safi = SAFI(safi)
@@ -580,7 +578,7 @@ class MultiprotocolUnreachableNLRI(PathAttribute):
     type_ = 15
 
     def __init__(self, afi: int, safi: int, nlri: List[NLRI]=[],
-                flags: int=PathAttribute.FLAG_OPTIONAL) -> None:
+                 flags: int=PathAttribute.FLAG_OPTIONAL) -> None:
         self.flags = flags
         self.afi = AFI(afi)
         self.safi = SAFI(safi)
@@ -630,7 +628,8 @@ class MultiprotocolUnreachableNLRI(PathAttribute):
         return cls.from_attribute(attr)
 
     @classmethod
-    def from_attribute(cls, attr: PathAttribute) -> MultiprotocolUnreachableNLRI:
+    def from_attribute(cls, attr: PathAttribute) \
+            -> MultiprotocolUnreachableNLRI:
         b = attr.payload
         afi, safi = int.from_bytes(b[0:2], byteorder="big"), b[2]
         attr = cls(AFI(afi), SAFI(safi), flags=attr.flags)
@@ -642,12 +641,11 @@ class MultiprotocolUnreachableNLRI(PathAttribute):
         return attr
 
 
-
 class OriginAttribute(PathAttribute):
     type_ = 1
 
     def __init__(self, origin: int,
-            flags: int=PathAttribute.FLAG_TRANSITIVE) -> None:
+                 flags: int=PathAttribute.FLAG_TRANSITIVE) -> None:
         self.origin = origin
         self.flags = flags
 
@@ -684,7 +682,6 @@ class OriginAttribute(PathAttribute):
         return cls(attr.payload[0], attr.flags)
 
 
-
 class ASPathSegmentType(enum.Enum):
     AS_SET = 1
     AS_SEQUENCE = 2
@@ -696,7 +693,7 @@ class ASPathAttribute(PathAttribute):
     segments: List[Union[Set[int], List[int]]]
 
     def __init__(self, segments: List[Union[Set[int], List[int]]]=[],
-            flags: int=PathAttribute.FLAG_TRANSITIVE) -> None:
+                 flags: int=PathAttribute.FLAG_TRANSITIVE) -> None:
         self.segments = list(segments)
         self.flags = flags
 
@@ -740,10 +737,9 @@ class ASPathAttribute(PathAttribute):
         return attr
 
 
-
 class AS4PathAttribute(ASPathAttribute):
     def __init__(self, segments: List[Union[Set[int], List[int]]]=[],
-            flags: int=PathAttribute.FLAG_TRANSITIVE) -> None:
+                 flags: int=PathAttribute.FLAG_TRANSITIVE) -> None:
         super().__init__(segments, flags)
 
     @property
@@ -787,7 +783,7 @@ class NextHopAttribute(PathAttribute):
     next_hop: netaddr.IPAddress
 
     def __init__(self, next_hop: netaddr.IPAddress,
-            flags: int=PathAttribute.FLAG_TRANSITIVE) -> None:
+                 flags: int=PathAttribute.FLAG_TRANSITIVE) -> None:
         self.next_hop = next_hop
         self.flags = flags
 
@@ -806,15 +802,14 @@ class NextHopAttribute(PathAttribute):
     def from_attribute(cls, attr: PathAttribute) -> NextHopAttribute:
         b = attr.payload
         return cls(netaddr.IPAddress(int.from_bytes(b[0:4], byteorder="big")),
-                flags=attr.flags)
-
+                   flags=attr.flags)
 
 
 class MultiExitDisc(PathAttribute):
     type_ = 4
 
     def __init__(self, med: int,
-            flags: int=PathAttribute.FLAG_OPTIONAL) -> None:
+                 flags: int=PathAttribute.FLAG_OPTIONAL) -> None:
         self.med = med
         self.flags = flags
 
@@ -836,12 +831,11 @@ class MultiExitDisc(PathAttribute):
         return cls(int.from_bytes(b[0:4], byteorder="big"), flags=attr.flags)
 
 
-
 class LocalPrefAttribute(PathAttribute):
     type_ = 5
 
     def __init__(self, local_pref: int,
-            flags: int=PathAttribute.FLAG_TRANSITIVE) -> None:
+                 flags: int=PathAttribute.FLAG_TRANSITIVE) -> None:
         self.local_pref = local_pref
         self.flags = flags
 
@@ -861,7 +855,6 @@ class LocalPrefAttribute(PathAttribute):
     def from_attribute(cls, attr: PathAttribute) -> LocalPrefAttribute:
         b = attr.payload
         return cls(int.from_bytes(b[0:4], byteorder="big"), flags=attr.flags)
-
 
 
 class AtomicAggregateAttribute(PathAttribute):
@@ -887,7 +880,6 @@ class AtomicAggregateAttribute(PathAttribute):
         return cls(flags=attr.flags)
 
 
-
 class AggregatorAttribute(PathAttribute):
     type_ = 7
 
@@ -895,8 +887,8 @@ class AggregatorAttribute(PathAttribute):
     ip_address: netaddr.IPAddress
 
     def __init__(self, asn: int, ip_address: netaddr.IPAddress,
-            flags: int=PathAttribute.FLAG_OPTIONAL |
-            PathAttribute.FLAG_TRANSITIVE) -> None:
+                 flags: int=PathAttribute.FLAG_OPTIONAL |
+                 PathAttribute.FLAG_TRANSITIVE) -> None:
         self.asn = asn
         self.ip_address = ip_address
         self.flags = flags
@@ -926,14 +918,13 @@ class AggregatorAttribute(PathAttribute):
                    flags=attr.flags)
 
 
-
 class CommunitiesAttribute(PathAttribute):
     type_ = 8
 
     communities: List[int]
 
     def __init__(self, communities: List[int]=[],
-                flags: int=PathAttribute.FLAG_TRANSITIVE |
+                 flags: int=PathAttribute.FLAG_TRANSITIVE |
                  PathAttribute.FLAG_OPTIONAL) -> None:
         self.communities = list(communities)
         self.flags = flags
@@ -978,11 +969,12 @@ class CommunitiesAttribute(PathAttribute):
 
 LargeCommunity = Tuple[int, int, int]
 
+
 class LargeCommunitiesAttribute(PathAttribute):
     type_ = 32
 
     def __init__(self, communities: List[LargeCommunity]=[],
-            flags: int=PathAttribute.FLAG_OPTIONAL |
+                 flags: int=PathAttribute.FLAG_OPTIONAL |
                  PathAttribute.FLAG_TRANSITIVE) -> None:
         self.communities = list(communities)
         self.flags = flags
@@ -1017,7 +1009,6 @@ class LargeCommunitiesAttribute(PathAttribute):
         return attr
 
 
-
 def nlri_to_netaddr(nlri: NLRI, version: int=4) -> netaddr.IPNetwork:
     prefix = nlri[0]
     addr = nlri[1].ljust(4 if version == 4 else 16, b'\0')
@@ -1035,6 +1026,7 @@ def nlri_octets(prefix: int) -> int:
 
 NLRI = Tuple[int, bytes]
 
+
 class UpdateMessage(Message):
     type_ = MessageType.UPDATE
     path_attributes: List[PathAttribute]
@@ -1042,8 +1034,8 @@ class UpdateMessage(Message):
     withdrawn: List[NLRI]
 
     def __init__(self, withdrawn: List[NLRI]=[],
-            path_attributes: List[PathAttribute]=[],
-            nlri: List[NLRI]=[]):
+                 path_attributes: List[PathAttribute]=[],
+                 nlri: List[NLRI]=[]):
         self.withdrawn = list(withdrawn)
         self.path_attributes = list(path_attributes)
         self.nlri = list(nlri)
@@ -1070,7 +1062,8 @@ class UpdateMessage(Message):
     def ip_withdrawn(self, withdrawn: List[netaddr.IPNetwork]) -> None:
         pass
 
-    def mp_nlri(self) -> Generator[Tuple[AFI, SAFI, netaddr.IPNetwork], None, None]:
+    def mp_nlri(self) -> Generator[Tuple[AFI, SAFI, netaddr.IPNetwork],
+                                   None, None]:
         for net in self.ip_nlri:
             yield (AFI.AFI_IPV4, SAFI.SAFI_UNICAST, net)
         for attr in self.path_attributes:
@@ -1083,7 +1076,8 @@ class UpdateMessage(Message):
                 for nlri in attr.nlri:
                     yield (attr.afi, attr.safi, nlri)
 
-    def mp_withdrawn(self) -> Generator[Tuple[AFI, SAFI, netaddr.IPNetwork], None, None]:
+    def mp_withdrawn(self) -> Generator[Tuple[AFI, SAFI, netaddr.IPNetwork],
+                                        None, None]:
         for net in self.ip_withdrawn:
             yield (AFI.AFI_IPV4, SAFI.SAFI_UNICAST, net)
         for attr in self.path_attributes:
@@ -1173,7 +1167,7 @@ class NotificationMessage(Message):
     data: bytes
 
     def __init__(self, error_code: int=0, error_subcode: int=0,
-            data: bytes=b"") -> None:
+                 data: bytes=b"") -> None:
         self.error_code = error_code
         self.error_subcode = error_subcode
         self.data = bytes(data)
@@ -1310,6 +1304,20 @@ class MessageDecoder(object):
 
     def register_parameter_type(self, t: Type[Parameter]) -> None:
         self.parameter_types[t.type_] = t
+
+    def __contains__(self, t: Union[Type[Parameter],
+                                    Type[Message],
+                                    Type[PathAttribute],
+                                    Type[Capability]]) -> bool:
+        if issubclass(t, Parameter):
+            return t.type_ in self.parameter_types
+        elif issubclass(t, Message):
+            return t.type_ in self.message_types
+        elif issubclass(t, PathAttribute):
+            return t.type_ in self.path_attribute_types
+        elif issubclass(t, Capability):
+            return t.type_ in self.capability_types
+        return False
 
 
 async def read_message(reader: asyncio.StreamReader) -> bytes:
