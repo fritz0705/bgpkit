@@ -1,5 +1,3 @@
-# coding: utf-8
-
 from __future__ import annotations
 
 import asyncio
@@ -12,7 +10,7 @@ import netaddr
 class MessageType(int):
     """A MessageType object represents one of the BGP message types, which are
     defined in RFC 4271. Standard message types are
-    `MessageType.OPEN`, `MessageType.UPDATE`, `MessageType.NOTIFICATION`, 
+    `MessageType.OPEN`, `MessageType.UPDATE`, `MessageType.NOTIFICATION`,
     and `MessageType.KEEPALIVE` for OPEN, UPDATE, NOTIFICATION, and KEEPALIVE
     messages, respectively. """
 
@@ -21,6 +19,7 @@ class MessageType(int):
     UPDATE: MessageType
     NOTIFICATION: MessageType
     KEEPALIVE: MessageType
+    ROUTE_REFRESH: MessageType
 
     def __init__(self, _int: int) -> None:
         if 255 < _int or _int < 0:
@@ -41,6 +40,8 @@ class MessageType(int):
             return "MessageType.NOTIFICATION"
         elif self == self.KEEPALIVE:
             return "MessageType.KEEPALIVE"
+        elif self == self.ROUTE_REFRESH:
+            return "MessageType.ROUTE_REFRESH"
         return f"MessageType({int(self)!r})"
 
 
@@ -49,6 +50,7 @@ MessageType.OPEN = MessageType(1)
 MessageType.UPDATE = MessageType(2)
 MessageType.NOTIFICATION = MessageType(3)
 MessageType.KEEPALIVE = MessageType(4)
+MessageType.ROUTE_REFRESH = MessageType(5)
 
 
 class Message(object):
@@ -60,14 +62,19 @@ class Message(object):
     payload: bytes
 
     def __init__(self, type_: int, payload: bytes=b"") -> None:
+        """Constructs a generic BGP message from `MessageType`, given in
+        `type_`, and message payload, given in `payload`."""
         self.type_ = MessageType(type_)
         self.payload = bytes(payload)
 
     @property
     def length(self) -> int:
+        """Length of the encoded BGP message, including the marker and payload.
+        """
         return len(self.payload) + 19
 
     def to_bytes(self) -> bytes:
+        """Encodes the BGP message to bytes-like object."""
         b = bytearray()
         b.extend(b"\xff" * 16)
         b.extend(self.length.to_bytes(2, byteorder="big"))
@@ -77,14 +84,15 @@ class Message(object):
 
     @classmethod
     def from_bytes(cls, b: bytes) -> Message:
+        """Decode BGP message from bytes-like object."""
         length = int.from_bytes(b[16:18], byteorder="big")
         type_ = MessageType(int.from_bytes(b[18:19], byteorder="big"))
         msg = cls(type_, b[19:])
         return msg
 
     def __repr__(self) -> str:
-        return "<Message length={!r} type={!r} payload={!r}>".format(
-            self.length, self.type_, self.payload)
+        return f"<Message length={self.length!r} type={self.type_!r} " \
+            f"payload={self.payload!r}>"
 
 
 class OpenMessage(Message):
@@ -126,10 +134,10 @@ class OpenMessage(Message):
             yield from param.capabilities
 
     def __repr__(self) -> str:
-        return "<OpenMessage version={self.version!r} asn={self.asn!r} " \
-            "hold_time={self.hold_time!r} "\
-            "router_id={self.router_id!r} "\
-            "parameters={self.parameters!r}>".format(self=self)
+        return f"<OpenMessage version={self.version!r} asn={self.asn!r} " \
+            f"hold_time={self.hold_time!r} "\
+            f"router_id={self.router_id!r} "\
+            f"parameters={self.parameters!r}>"
 
     @property
     def payload(self) -> bytes:
@@ -182,8 +190,8 @@ class Parameter(object):
         self.payload = bytes(payload)
 
     def __repr__(self) -> str:
-        return "<Parameter param_type={!r} payload={!r}>".format(
-            self.type_, self.payload)
+        return f"<Parameter type={self.type_!r} " \
+            f"payload={self.payload!r}>"
 
     def to_bytes(self) -> bytes:
         b = bytearray()
@@ -206,8 +214,7 @@ class CapabilityParameter(Parameter):
         self.capabilities = list(capabilities)
 
     def __repr__(self) -> str:
-        return "<CapabilityParameter capabilities={!r}>".format(
-            self.capabilities)
+        return f"<CapabilityParameter capabilities={self.capabilities!r}>"
 
     @property
     def payload(self) -> bytes:
@@ -240,8 +247,7 @@ class Capability(object):
         self.payload = payload
 
     def __repr__(self) -> str:
-        return "<Capability code={!r} payload={!r}>".format(
-            self.type_, self.payload)
+        return f"<Capability type={self.type_!r} payload={self.payload!r}>"
 
     def as_param(self) -> CapabilityParameter:
         return CapabilityParameter([self])
@@ -257,6 +263,14 @@ class Capability(object):
     def from_bytes(cls, b: bytes) -> Capability:
         return cls(b[0], b[2:2 + b[1]])
 
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, Capability):
+            return False
+        return self.to_bytes() == other.to_bytes()
+
+    def __hash__(self) -> int:
+        return hash(bytes(self.to_bytes()))
+
 
 class FourOctetASNCapability(Capability):
     type_ = 65
@@ -269,7 +283,7 @@ class FourOctetASNCapability(Capability):
         return self.asn.to_bytes(4, byteorder="big")
 
     def __repr__(self) -> str:
-        return "<FourOctetASNCapability asn={}>".format(self.asn)
+        return f"<FourOctetASNCapability asn={self.asn!r}>"
 
     @classmethod
     def from_bytes(cls, b: bytes) -> FourOctetASNCapability:
@@ -278,21 +292,25 @@ class FourOctetASNCapability(Capability):
 
 
 class AFI(int):
-    AFI_IPV4: AFI
-    AFI_IPV6: AFI
-    AFI_NSAP: AFI
-    AFI_HDLC: AFI
-    AFI_BBN_1822: AFI
-    AFI_802: AFI
-    AFI_E163: AFI
-    AFI_E164: AFI
-    AFI_F69: AFI
-    AFI_BGP_LS: AFI
+    AFI_IPV4: ClassVar[AFI]
+    AFI_IPV6: ClassVar[AFI]
+    AFI_NSAP: ClassVar[AFI]
+    AFI_HDLC: ClassVar[AFI]
+    AFI_BBN_1822: ClassVar[AFI]
+    AFI_802: ClassVar[AFI]
+    AFI_E163: ClassVar[AFI]
+    AFI_E164: ClassVar[AFI]
+    AFI_F69: ClassVar[AFI]
+    AFI_BGP_LS: ClassVar[AFI]
 
     def __init__(self, _int: int) -> None:
         if _int > 65535 or 0 > _int:
             raise ValueError("A AFI value must be between 0 and 65535")
         super().__init__()
+
+    @property
+    def is_ip(self):
+        return self == self.AFI_IPV4 or self == self.AFI_IPV6
 
     def __str__(self) -> str:
         return repr(self)
@@ -334,10 +352,12 @@ AFI.AFI_BGP_LS = AFI(16388)
 
 
 class SAFI(int):
-    SAFI_UNICAST: SAFI
-    SAFI_MULTICAST: SAFI
-    SAFI_BGP_LS: SAFI
-    SAFI_FLOW4: SAFI
+    SAFI_UNICAST: ClassVar[SAFI]
+    SAFI_MULTICAST: ClassVar[SAFI]
+    SAFI_BGP_LS: ClassVar[SAFI]
+    SAFI_BGP_LS_VPN: ClassVar[SAFI]
+    SAFI_FLOW4: ClassVar[SAFI]
+    SAFI_FLOW4_VPN: ClassVar[SAFI]
 
     def __init__(self, _int: int) -> None:
         if 255 < _int or _int < 0:
@@ -354,15 +374,23 @@ class SAFI(int):
             return "SAFI.SAFI_MULTICAST"
         elif self == self.SAFI_BGP_LS:
             return "SAFI.SAFI_BGP_LS"
+        elif self == self.SAFI_BGP_LS_VPN:
+            return "SAFI.SAFI_BGP_LS_VPN"
         elif self == self.SAFI_FLOW4:
             return "SAFI.SAFI_FLOW4"
+        elif self == self.SAFI_FLOW4_VPN:
+            return "SAFI.SAFI_FLOW4_VPN"
         return f"SAFI({int(self)!r})"
 
 
 SAFI.SAFI_UNICAST = SAFI(1)
 SAFI.SAFI_MULTICAST = SAFI(2)
 SAFI.SAFI_BGP_LS = SAFI(71)
+SAFI.SAFI_BGP_LS_VPN = SAFI(72)
 SAFI.SAFI_FLOW4 = SAFI(133)
+SAFI.SAFI_FLOW4_VPN = SAFI(134)
+
+ProtoTuple = Tuple[AFI, SAFI]
 
 
 class MultiprotocolCapability(Capability):
@@ -378,8 +406,9 @@ class MultiprotocolCapability(Capability):
             self.safi.to_bytes(1, byteorder="big")
 
     def __repr__(self) -> str:
-        return "<MultiprotocolCapability afi={} safi={}>".format(
-            self.afi, self.safi)
+        return f"<MultiprotocolCapability afi={self.afi!r} " \
+            f"safi={self.safi!r}>" \
+
 
     @classmethod
     def from_bytes(cls, b: bytes) -> MultiprotocolCapability:
@@ -389,17 +418,112 @@ class MultiprotocolCapability(Capability):
             int.from_bytes(b[3:4], byteorder="big"))
 
 
+class GracefulRestartCapability(Capability):
+    type_ = 64
+    restart_flags: int
+    restart_time: int
+    tuples: List[Tuple[AFI, SAFI, int]]
+
+    def __init__(self, restart_flags: int=0,
+                 restart_time: int=0,
+                 tuples: List[Tuple[AFI, SAFI, int]]=[]) -> None:
+        self.restart_flags = restart_flags
+        self.restart_time = restart_time
+        self.tuples = list(tuples)
+
+    def __repr__(self) -> str:
+        return f"<GracefulRestartCapability " \
+            f"restart_flags={self.restart_flags!r} " \
+            f"restart_time={self.restart_time!r} " \
+            f"tuples={self.tuples!r}>"
+
+    @property
+    def payload(self) -> bytes:
+        b = bytearray()
+        return b
+
+    @classmethod
+    def from_bytes(cls, b: bytes) -> GracefulRestartCapability:
+        b = Capability.from_bytes(b).payload
+        restart_flags = int.from_bytes(b[0:2], byteorder="big")
+        restart_time = restart_flags & 0xfff
+        restart_flags = restart_flags >> 12
+        cap = cls(restart_flags=restart_flags,
+                  restart_time=restart_time)
+        b = b[2:]
+        while not b and len(b) >= 4:
+            afi = int.from_bytes(b[0:2], byteorder="big")
+            safi = b[2]
+            flags = b[3]
+            cap.tuples.append((AFI(afi), SAFI(safi), flags))
+            b = b[4:]
+        return cap
+
+
+class AddPathCapability(Capability):
+    type_ = 69
+    protos: Set[Tuple[AFI, SAFI, int]]
+
+    def __init__(self, protos: Set[Tuple[AFI, SAFI, int]]=set()) -> None:
+        self.protos = set(protos)
+
+    def __repr__(self) -> str:
+        return f"<AddPathCapability {self.protos!r}>"
+
+    @property
+    def payload(self) -> bytes:
+        b = bytearray()
+        for afi, safi, send_receive in self.protos:
+            b.extend(afi.to_bytes(2, byteorder="big"))
+            b.extend(safi.to_bytes(1, byteorder="big"))
+            b.extend(send_receive.to_bytes(1, byteorder="big"))
+        return b
+
+    @classmethod
+    def from_bytes(cls, b: bytes) -> AddPathCapability:
+        b = Capability.from_bytes(b).payload
+        cap = cls()
+        while len(b) >= 4:
+            afi = AFI(int.from_bytes(b[0:2], byteorder="big"))
+            safi = SAFI(int.from_bytes(b[2:3], byteorder="big"))
+            send_receive = int.from_bytes(b[3:4], byteorder="big")
+            cap.protos.add((afi, safi, send_receive))
+            b = b[4:]
+        return cap
+
+    def __and__(self, other: AddPathCapability) -> AddPathCapability:
+        return AddPathCapability(self.protos & other.protos)
+
+
+class RouteRefreshCapability(Capability):
+    type_ = 2
+
+    def __init__(self) -> None:
+        pass
+
+    def __repr__(self) -> str:
+        return f"<RouteRefreshCapability>"
+
+    @property
+    def payload(self) -> bytes:
+        return b""
+
+    @classmethod
+    def from_bytes(cls, b: bytes) -> RouteRefreshCapability:
+        return cls()
+
+
 class PathAttribute(object):
-    FLAG_EXTENDED_LENGTH = 16
-    FLAG_PARTIAL = 32
-    FLAG_TRANSITIVE = 64
-    FLAG_OPTIONAL = 128
+    FLAG_EXTENDED_LENGTH: ClassVar[int] = 16
+    FLAG_PARTIAL: ClassVar[int] = 32
+    FLAG_TRANSITIVE: ClassVar[int] = 64
+    FLAG_OPTIONAL: ClassVar[int] = 128
 
     payload: bytes
     type_: int
     flags: int
 
-    def __init__(self, flags: int=0, type_: int=0, payload: bytes=b""):
+    def __init__(self, flags: int=0, type_: int=0, payload: bytes=b"") -> None:
         self.type_ = type_
         self.flags = flags
         self.payload = payload
@@ -462,8 +586,9 @@ class PathAttribute(object):
             ('E' if self.extended_length else '-')
 
     def __repr__(self) -> str:
-        return "<PathAttribute type={} flags={} payload={!r}>".format(
-            self.type_, self.flag_code, self.payload)
+        return f"<PathAttribute type={self.type_!r} " \
+            f"flags={self.flag_code} " \
+            f"payload={self.payload!r}>"
 
     @classmethod
     def from_bytes(cls, b: bytes) -> PathAttribute:
@@ -484,15 +609,17 @@ class MultiprotocolReachableNLRI(PathAttribute):
     safi: SAFI
     next_hop: bytes
     nlri: List[NLRI]
+    nlri_raw: Optional[bytes]
 
     def __init__(self, afi: int, safi: int, next_hop: bytes,
-                 nlri: List[NLRI]=[],
+                 nlri: List[NLRI]=[], nlri_raw: Optional[bytes]=None,
                  flags: int=PathAttribute.FLAG_OPTIONAL) -> None:
         self.flags = flags
         self.afi = AFI(afi)
         self.safi = SAFI(safi)
         self.next_hop = next_hop
         self.nlri = list(nlri)
+        self.nlri_raw = nlri_raw
 
     @property
     def ip_routes(self) -> List[netaddr.IPNetwork]:
@@ -500,7 +627,8 @@ class MultiprotocolReachableNLRI(PathAttribute):
             return []
         routes = []
         for nlri in self.nlri:
-            routes.append(nlri_to_netaddr(nlri, version=self.ip_version))
+            if isinstance(nlri, IPNLRI):
+                routes.append(nlri.net)
         return routes
 
     @ip_routes.setter
@@ -528,17 +656,20 @@ class MultiprotocolReachableNLRI(PathAttribute):
         pass
 
     def __repr__(self) -> str:
+        if self.nlri_raw is not None:
+            return f"<MultiprotocolReachableNLRI afi={self.afi!r} " \
+                f"safi={self.safi!r} " \
+                f"next_hop={self.next_hop!r} " \
+                f"nlri_raw={self.nlri_raw!r}>"
         if self.afi in {AFI.AFI_IPV4, AFI.AFI_IPV6}:
-            return "<MultiprotocolReachableNLRI afi={} safi={} "\
-                "ip_next_hop={!r} ip_routes={!r}>".format(self.afi,
-                                                          self.safi,
-                                                          self.ip_next_hop,
-                                                          self.ip_routes)
-        return "<MultiprotocolReachableNLRI afi={} safi={} next_hop={!r} " \
-            "nlri={!r}>".format(self.afi,
-                                self.safi,
-                                self.next_hop,
-                                self.nlri)
+            return f"<MultiprotocolReachableNLRI afi={self.afi!r} " \
+                f"safi={self.safi!r} " \
+                f"ip_next_hop={self.ip_next_hop!r} " \
+                f"ip_routes={self.ip_routes!r}>"
+        return f"<MultiprotocolReachableNLRI afi={self.afi!r} " \
+            f"safi={self.safi!r} " \
+            f"next_hop={self.next_hop!r} " \
+            f"nlri={self.nlri!r}>"
 
     @property
     def payload(self) -> bytes:
@@ -549,9 +680,11 @@ class MultiprotocolReachableNLRI(PathAttribute):
         b.extend(len(next_hop).to_bytes(1, byteorder="big"))
         b.extend(next_hop)
         b.extend(b"\0")
-        for length, prefix in self.nlri:
-            b.extend(length.to_bytes(1, byteorder="big"))
-            b.extend(prefix[0:length])
+        if self.nlri_raw is not None:
+            b.extend(self.nlri_raw)
+        else:
+            for nlri in self.nlri:
+                b.extend(nlri.to_bytes())
         return b
 
     @classmethod
@@ -565,24 +698,26 @@ class MultiprotocolReachableNLRI(PathAttribute):
         afi, safi = int.from_bytes(b[0:2], byteorder="big"), b[2]
         next_hop_len = b[3]
         next_hop = b[4:4 + next_hop_len]
-        nlri_base = b[5 + next_hop_len:]
-        attr = cls(afi, safi, next_hop, flags=attr.flags)
-        while nlri_base:
-            n_len = nlri_base[0]
-            attr.nlri.append((n_len, nlri_base[1: 1 + nlri_octets(n_len)]))
-            nlri_base = nlri_base[1 + nlri_octets(n_len):]
+        nlri_raw = b[5 + next_hop_len:]
+        attr = cls(afi, safi, next_hop, nlri_raw=nlri_raw, flags=attr.flags)
         return attr
 
 
 class MultiprotocolUnreachableNLRI(PathAttribute):
     type_ = 15
+    afi: AFI
+    safi: SAFI
+    nlri: List[NLRI]
+    nlri_raw: Optional[bytes]
 
     def __init__(self, afi: int, safi: int, nlri: List[NLRI]=[],
+                 nlri_raw: Optional[bytes]=None,
                  flags: int=PathAttribute.FLAG_OPTIONAL) -> None:
         self.flags = flags
         self.afi = AFI(afi)
         self.safi = SAFI(safi)
         self.nlri = list(nlri)
+        self.nlri_raw = nlri_raw
 
     @property
     def ip_routes(self) -> List[netaddr.IPNetwork]:
@@ -590,7 +725,8 @@ class MultiprotocolUnreachableNLRI(PathAttribute):
             return []
         routes = []
         for nlri in self.nlri:
-            routes.append(nlri_to_netaddr(nlri, version=self.ip_version))
+            if isinstance(nlri, IPNLRI):
+                routes.append(nlri.net)
         return routes
 
     @property
@@ -602,24 +738,28 @@ class MultiprotocolUnreachableNLRI(PathAttribute):
         return None
 
     def __repr__(self) -> str:
+        if self.nlri_raw is not None:
+            return f"<MultiprotocolUnreachableNLRI afi={self.afi!r} " \
+                f"safi={self.safi!r} " \
+                f"nlri_raw={self.nlri_raw!r}>"
         if self.afi in {AFI.AFI_IPV4, AFI.AFI_IPV6}:
-            return "<MultiprotocolUnreachableNLRI afi={} safi={} "\
-                "ip_routes={!r}".format(self.afi,
-                                        self.safi,
-                                        self.ip_routes)
-        return "<MultiprotocolUnreachableNLRI afi={} safi={} "\
-            "nlri={!r}>".format(self.afi,
-                                self.safi,
-                                self.nlri)
+            return f"<MultiprotocolUnreachableNLRI afi={self.afi!r} " \
+                f"safi={self.safi!r} " \
+                f"ip_routes={self.ip_routes!r}>"
+        return f"<MultiprotocolUnreachableNLRI afi={self.afi!r} " \
+            f"safi={self.safi!r} " \
+            f"nlri={self.nlri!r}>"
 
     @property
     def payload(self) -> bytes:
         b = bytearray()
         b.extend(self.afi.to_bytes(2, byteorder="big"))
         b.extend(self.safi.to_bytes(1, byteorder="big"))
-        for length, prefix in self.nlri:
-            b.extend(length.to_bytes(1, byteorder="big"))
-            b.extend(prefix[0:length])
+        if self.nlri_raw is not None:
+            b.extend(self.nlri_raw)
+        else:
+            for nlri in self.nlri:
+                b.extend(nlri.to_bytes())
         return b
 
     @classmethod
@@ -632,13 +772,7 @@ class MultiprotocolUnreachableNLRI(PathAttribute):
             -> MultiprotocolUnreachableNLRI:
         b = attr.payload
         afi, safi = int.from_bytes(b[0:2], byteorder="big"), b[2]
-        attr = cls(AFI(afi), SAFI(safi), flags=attr.flags)
-        nlri_b = b[3:]
-        while nlri_b:
-            n_len = nlri_b[0]
-            attr.nlri.append((n_len, nlri_b[1:1 + nlri_octets(n_len)]))
-            nlri_b = nlri_b[1 + nlri_octets(n_len):]
-        return attr
+        return cls(afi, safi, nlri_raw=b[3:], flags=attr.flags)
 
 
 class OriginAttribute(PathAttribute):
@@ -670,8 +804,7 @@ class OriginAttribute(PathAttribute):
         return self.origin.to_bytes(1, byteorder="big")
 
     def __repr__(self) -> str:
-        return "<OriginAttribute origin={}>".format(
-            self.origin_name)
+        return f"<OriginAttribute origin={self.origin_name}>"
 
     @classmethod
     def from_bytes(cls, b: bytes) -> OriginAttribute:
@@ -689,7 +822,6 @@ class ASPathSegmentType(enum.Enum):
 
 class ASPathAttribute(PathAttribute):
     type_ = 2
-
     segments: List[Union[Set[int], List[int]]]
 
     def __init__(self, segments: List[Union[Set[int], List[int]]]=[],
@@ -698,7 +830,7 @@ class ASPathAttribute(PathAttribute):
         self.flags = flags
 
     def __repr__(self) -> str:
-        return "<ASPathAttribute {!r}>".format(self.segments)
+        return f"<ASPathAttribute {self.segments!r}>"
 
     @property
     def payload(self) -> bytes:
@@ -738,9 +870,8 @@ class ASPathAttribute(PathAttribute):
 
 
 class AS4PathAttribute(ASPathAttribute):
-    def __init__(self, segments: List[Union[Set[int], List[int]]]=[],
-                 flags: int=PathAttribute.FLAG_TRANSITIVE) -> None:
-        super().__init__(segments, flags)
+    def __repr__(self) -> str:
+        return f"<AS4PathAttribute {self.segments!r}>"
 
     @property
     def payload(self) -> bytes:
@@ -792,7 +923,7 @@ class NextHopAttribute(PathAttribute):
         return bytes(self.next_hop.packed)
 
     def __repr__(self) -> str:
-        return "<NextHopAttribute {!r}>".format(self.next_hop)
+        return f"<NextHopAttribute {self.next_hop!r}>"
 
     @classmethod
     def from_bytes(cls, b: bytes) -> NextHopAttribute:
@@ -818,7 +949,7 @@ class MultiExitDisc(PathAttribute):
         return self.med.to_bytes(4, byteorder="big")
 
     def __repr__(self) -> str:
-        return "<MultiExitDisc {!r}>".format(self.med)
+        return f"<MultiExitDisc {self.med!r}>"
 
     @classmethod
     def from_bytes(cls, b: bytes) -> MultiExitDisc:
@@ -844,7 +975,7 @@ class LocalPrefAttribute(PathAttribute):
         return self.local_pref.to_bytes(4, byteorder="big")
 
     def __repr__(self) -> str:
-        return "<LocalPrefAttribute {!r}>".format(self.local_pref)
+        return f"<LocalPrefAttribute {self.local_pref!r}>"
 
     @classmethod
     def from_bytes(cls, b: bytes) -> LocalPrefAttribute:
@@ -882,7 +1013,6 @@ class AtomicAggregateAttribute(PathAttribute):
 
 class AggregatorAttribute(PathAttribute):
     type_ = 7
-
     asn: int
     ip_address: netaddr.IPAddress
 
@@ -899,9 +1029,8 @@ class AggregatorAttribute(PathAttribute):
         return bytes(b + self.ip_address.packed)
 
     def __repr__(self) -> str:
-        return "<AggregatorAttribute asn={!r} ip_address={!r}>".format(
-            self.asn,
-            self.ip_address)
+        return f"<AggregatorAttribute asn={self.asn!r} " \
+            f"ip_address={self.ip_address!r}>"
 
     @classmethod
     def from_bytes(cls, b: bytes) -> AggregatorAttribute:
@@ -918,9 +1047,28 @@ class AggregatorAttribute(PathAttribute):
                    flags=attr.flags)
 
 
+class Aggregator4Attribute(AggregatorAttribute):
+    @property
+    def payload(self) -> bytes:
+        b = self.asn.to_bytes(4, byteorder="big")
+        return bytes(b + self.ip_address.packed)
+
+    def __repr__(self) -> str:
+        return f"<Aggregator4Attribute asn={self.asn!r} " \
+            f"ip_address={self.ip_address}>"
+
+    @classmethod
+    def from_attribute(cls, attr: PathAttribute) -> AggregatorAttribute:
+        b = attr.payload
+        asn = int.from_bytes(b[0:4], byteorder="big")
+        b = b[4:]
+        return cls(asn,
+                   netaddr.IPAddress(int.from_bytes(b[0:4], byteorder="big")),
+                   flags=attr.flags)
+
+
 class CommunitiesAttribute(PathAttribute):
     type_ = 8
-
     communities: List[int]
 
     def __init__(self, communities: List[int]=[],
@@ -930,7 +1078,7 @@ class CommunitiesAttribute(PathAttribute):
         self.flags = flags
 
     def __repr__(self) -> str:
-        return "<CommunitiesAttribute {!r}>".format(self.pairs)
+        return f"<CommunitiesAttribute {self.pairs!r}>"
 
     @property
     def pairs(self) -> List[Tuple[int, int]]:
@@ -972,6 +1120,7 @@ LargeCommunity = Tuple[int, int, int]
 
 class LargeCommunitiesAttribute(PathAttribute):
     type_ = 32
+    communities: List[LargeCommunity]
 
     def __init__(self, communities: List[LargeCommunity]=[],
                  flags: int=PathAttribute.FLAG_OPTIONAL |
@@ -980,7 +1129,7 @@ class LargeCommunitiesAttribute(PathAttribute):
         self.flags = flags
 
     def __repr__(self) -> str:
-        return "<LargeCommunitiesAttribute {!r}>".format(self.communities)
+        return f"<LargeCommunitiesAttribute {self.communities!r}>"
 
     @property
     def payload(self) -> bytes:
@@ -1009,14 +1158,14 @@ class LargeCommunitiesAttribute(PathAttribute):
         return attr
 
 
-def nlri_to_netaddr(nlri: NLRI, version: int=4) -> netaddr.IPNetwork:
-    prefix = nlri[0]
-    addr = nlri[1].ljust(4 if version == 4 else 16, b'\0')
+def nlri_to_netaddr(prefix, payload, afi: AFI) -> netaddr.IPNetwork:
+    addr = payload.ljust(4 if afi == AFI.AFI_IPV4 else 16, b'\0')
+    version = 4 if afi == AFI.AFI_IPV4 else 6
     return netaddr.IPNetwork((int.from_bytes(addr, byteorder="big"), prefix),
                              version=version)
 
 
-def netaddr_to_nlri(network: netaddr.IPNetwork) -> NLRI:
+def netaddr_to_nlri(network: netaddr.IPNetwork) -> Tuple[int, bytes]:
     return (network.prefixlen, network.packed[:nlri_octets(network.prefixlen)])
 
 
@@ -1024,82 +1173,166 @@ def nlri_octets(prefix: int) -> int:
     return ((prefix - 1) >> 3) + 1
 
 
-NLRI = Tuple[int, bytes]
+class NLRI(object):
+    length: int
+    payload: bytes
+
+    def __init__(self, length: int, payload: bytes) -> None:
+        self.length = length
+        self.payload = payload
+
+    def __repr__(self) -> str:
+        return f"<NLRI {self.payload!r}/{self.length!r}>"
+
+    def to_bytes(self) -> bytes:
+        return self.length.to_bytes(1, "big") + self.payload
+
+    @classmethod
+    def from_bytes(cls, afi: AFI, safi: SAFI, b: bytes) -> Tuple[NLRI, int]:
+        octets = nlri_octets(b[0])
+        payload = b[1:1 + octets]
+        return cls(b[0], payload), 1 + octets
+
+
+class IPNLRI(NLRI):
+    protos = {(AFI.AFI_IPV4, SAFI.SAFI_UNICAST),
+              (AFI.AFI_IPV6, SAFI.SAFI_UNICAST),
+              (AFI.AFI_IPV4, SAFI.SAFI_MULTICAST),
+              (AFI.AFI_IPV6, SAFI.SAFI_MULTICAST)}
+    net: netaddr.IPNetwork
+    path_id: int = 1
+
+    def __init__(self, net: netaddr.IPNetwork) -> None:
+        self.net = net
+
+    def __repr__(self) -> str:
+        return f"<IPNLRI {self.net!r}>"
+
+    @property
+    def payload(self) -> bytes:
+        return self.net.packed[:nlri_octets(self.length)]
+
+    @property
+    def length(self) -> int:
+        return self.net.prefixlen
+
+    @classmethod
+    def from_bytes(cls, afi: AFI, safi: SAFI, b: bytes) -> Tuple[IPNLRI, int]:
+        octets = nlri_octets(b[0])
+        payload = b[1:1 + octets]
+        return cls(nlri_to_netaddr(b[0], payload, afi)), 1 + octets
+
+
+class AddPathIPNLRI(IPNLRI):
+    path_id: int
+
+    def __init__(self, net: netaddr.IPNetwork, path_id: int) -> None:
+        super().__init__(net)
+        self.path_id = path_id
+
+    def __repr__(self) -> str:
+        return f"<AddPathIPNLRI {self.net!r} {self.path_id!r}>"
+
+    def to_bytes(self) -> bytes:
+        return self.path_id.to_bytes(4, "big") + super().to_bytes()
+
+    @classmethod
+    def from_bytes(cls, afi: AFI, safi: SAFI, b: bytes) \
+            -> Tuple[AddPathIPNLRI, int]:
+        path_id = int.from_bytes(b[0:4], "big")
+        octets = nlri_octets(b[4])
+        payload = b[5:5 + octets]
+        return cls(nlri_to_netaddr(b[4], payload, afi), path_id), 5 + octets
 
 
 class UpdateMessage(Message):
     type_ = MessageType.UPDATE
     path_attributes: List[PathAttribute]
     nlri: List[NLRI]
+    nlri_raw: Optional[bytes]
     withdrawn: List[NLRI]
+    withdrawn_raw: Optional[bytes]
 
-    def __init__(self, withdrawn: List[NLRI]=[],
-                 path_attributes: List[PathAttribute]=[],
-                 nlri: List[NLRI]=[]):
+    def __init__(self, withdrawn: List[NLRI] = [],
+                 path_attributes: List[PathAttribute] = [],
+                 nlri: List[NLRI] = [],
+                 nlri_raw: Optional[bytes] = None,
+                 withdrawn_raw: Optional[bytes] = None):
         self.withdrawn = list(withdrawn)
         self.path_attributes = list(path_attributes)
         self.nlri = list(nlri)
+        self.nlri_raw = nlri_raw
+        self.withdrawn_raw = withdrawn_raw
+
+    @property
+    def is_empty(self):
+        for _ in self.mp_nlri():
+            break
+        else:
+            return True
+        return False
 
     @property
     def ip_nlri(self) -> List[netaddr.IPNetwork]:
         networks = []
         for nlri in self.nlri:
-            networks.append(nlri_to_netaddr(nlri))
+            if isinstance(nlri, IPNLRI):
+                networks.append(nlri.net)
         return networks
-
-    @ip_nlri.setter
-    def ip_nlri(self, nlri: List[netaddr.IPNetwork]) -> None:
-        pass
 
     @property
     def ip_withdrawn(self) -> List[netaddr.IPNetwork]:
         networks = []
         for withdrawn in self.withdrawn:
-            networks.append(nlri_to_netaddr(withdrawn))
+            if isinstance(withdrawn, IPNLRI):
+                networks.append(withdrawn)
         return networks
 
-    @ip_withdrawn.setter
-    def ip_withdrawn(self, withdrawn: List[netaddr.IPNetwork]) -> None:
-        pass
-
-    def mp_nlri(self) -> Generator[Tuple[AFI, SAFI, netaddr.IPNetwork],
-                                   None, None]:
-        for net in self.ip_nlri:
-            yield (AFI.AFI_IPV4, SAFI.SAFI_UNICAST, net)
+    def mp_nlri(self, types: Optional[Set[ProtoTuple]] = None) \
+            -> Generator[Tuple[AFI, SAFI, NLRI], None, None]:
+        for nlri in self.nlri:
+            if types is None or (AFI.AFI_IPV4, SAFI.SAFI_UNICAST) in types:
+                yield (AFI.AFI_IPV4, SAFI.SAFI_UNICAST, nlri)
         for attr in self.path_attributes:
             if not isinstance(attr, MultiprotocolReachableNLRI):
                 continue
-            if attr.ip_version:
-                for net in attr.ip_routes:
-                    yield (attr.afi, attr.safi, net)
-            else:
-                for nlri in attr.nlri:
-                    yield (attr.afi, attr.safi, nlri)
+            if types is not None and (attr.afi, attr.safi) not in types:
+                continue
+            for nlri in attr.nlri:
+                yield (attr.afi, attr.safi, nlri)
 
-    def mp_withdrawn(self) -> Generator[Tuple[AFI, SAFI, netaddr.IPNetwork],
-                                        None, None]:
-        for net in self.ip_withdrawn:
-            yield (AFI.AFI_IPV4, SAFI.SAFI_UNICAST, net)
+    def mp_withdrawn(self, types: Optional[Set[ProtoTuple]] = None) \
+            -> Generator[Tuple[AFI, SAFI, NLRI], None, None]:
+        for nlri in self.withdrawn:
+            if types is None or (AFI.AFI_IPV4, SAFI.SAFI_UNICAST) in types:
+                yield (AFI.AFI_IPV4, SAFI.SAFI_UNICAST, nlri)
         for attr in self.path_attributes:
             if not isinstance(attr, MultiprotocolUnreachableNLRI):
                 continue
-            if attr.ip_version:
-                for net in attr.ip_routes:
-                    yield (attr.afi, attr.safi, net)
-            else:
-                for nlri in attr.nlri:
-                    yield (attr.afi, attr.safi, nlri)
+            if types is not None and (attr.afi, attr.safi) not in types:
+                continue
+            for nlri in attr.nlri:
+                yield (attr.afi, attr.safi, nlri)
 
     def __repr__(self) -> str:
-        return "<UpdateMessage ip_withdrawn={self.ip_withdrawn!r} " \
-            "attributes={self.path_attributes!r} " \
-            "ip_nlri={self.ip_nlri!r}>".format(self=self)
+        s = "<UpdateMessage "
+        if self.withdrawn_raw is not None:
+            s += f"withdrawn_raw={self.withdrawn_raw!r} "
+        else:
+            s += f"withdrawn={self.withdrawn!r} "
+        if self.nlri_raw is not None:
+            s += f"nlri_raw={self.nlri_raw!r} "
+        else:
+            s += f"nlri={self.nlri!r} "
+        s += f"attributes={self.path_attributes!r}>"
+        return s
 
     def _to_bytes_withdrawn(self) -> bytes:
+        if self.withdrawn_raw is not None:
+            return self.withdrawn_raw
         b = bytearray()
         for withdrawn in self.withdrawn:
-            b.append(withdrawn[0])
-            b.extend(withdrawn[1])
+            b.extend(withdrawn.to_bytes())
         return b
 
     def _to_bytes_path_attrs(self) -> bytes:
@@ -1109,10 +1342,11 @@ class UpdateMessage(Message):
         return b
 
     def _to_bytes_nlri(self) -> bytes:
+        if self.nlri_raw is not None:
+            return self.nlri_raw
         b = bytearray()
         for nlri in self.nlri:
-            b.append(nlri[0])
-            b.extend(nlri[1])
+            b.extend(nlri.to_bytes())
         return b
 
     @property
@@ -1136,26 +1370,20 @@ class UpdateMessage(Message):
     def from_payload(cls, b: bytes) -> UpdateMessage:
         msg = cls()
 
-        withdrawn_len = int.from_bytes(b[0:2], byteorder="big")
-        withdrawn_b = b[2:2 + withdrawn_len]
-        path_attrs_len = int.from_bytes(b[2 + withdrawn_len:4 + withdrawn_len],
+        withdrawn_len = int.from_bytes(b[0: 2], byteorder="big")
+        withdrawn_raw = b[2: 2 + withdrawn_len]
+        path_attrs_len = int.from_bytes(b[2 + withdrawn_len: 4 + withdrawn_len],
                                         byteorder="big")
         path_attrs_b = b[4 + withdrawn_len:4 + withdrawn_len + path_attrs_len]
-        nlri_b = b[4 + withdrawn_len + path_attrs_len:]
+        nlri_raw = b[4 + withdrawn_len + path_attrs_len:]
 
-        while withdrawn_b:
-            w_len = withdrawn_b[0]
-            msg.withdrawn.append((w_len,
-                                  withdrawn_b[1:1 + nlri_octets(w_len)]))
-            withdrawn_b = withdrawn_b[1 + nlri_octets(w_len):]
         while path_attrs_b:
             attr = PathAttribute.from_bytes(path_attrs_b)
             msg.path_attributes.append(attr)
             path_attrs_b = path_attrs_b[attr.length:]
-        while nlri_b:
-            n_len = nlri_b[0]
-            msg.nlri.append((n_len, nlri_b[1:1 + nlri_octets(n_len)]))
-            nlri_b = nlri_b[1 + nlri_octets(n_len):]
+
+        msg.nlri_raw = nlri_raw
+        msg.withdrawn_raw = withdrawn_raw
 
         return msg
 
@@ -1166,16 +1394,16 @@ class NotificationMessage(Message):
     error_subcode: int
     data: bytes
 
-    def __init__(self, error_code: int=0, error_subcode: int=0,
-                 data: bytes=b"") -> None:
+    def __init__(self, error_code: int = 0, error_subcode: int = 0,
+                 data: bytes = b"") -> None:
         self.error_code = error_code
         self.error_subcode = error_subcode
         self.data = bytes(data)
 
     def __repr__(self) -> str:
-        return "<NotificationMessage error={self.error_code!r} "\
-            "subcode={self.error_subcode!r} " \
-            "data={self.data!r}>".format(self=self)
+        return f"<NotificationMessage error={self.error_code!r} " \
+            f"subcode={self.error_subcode!r} " \
+            f"data={self.data!r}>"
 
     @property
     def payload(self) -> bytes:
@@ -1217,30 +1445,77 @@ class KeepaliveMessage(Message):
         return cls()
 
 
+class RouteRefreshMessage(Message):
+    type_ = MessageType.ROUTE_REFRESH
+    afi: AFI
+    safi: SAFI
+    subtype: int
+
+    def __init__(self, afi: int, safi: int, subtype: int) -> None:
+        self.afi = AFI(afi)
+        self.safi = SAFI(safi)
+        self.subtype = subtype
+
+    def __repr__(self) -> str:
+        return f"<RouteRefreshMessage afi={self.afi!r} safi={self.safi!r} " \
+            f"subtype={self.subtype!r}>"
+
+    @property
+    def length(self) -> int:
+        return 19 + 4
+
+    @property
+    def payload(self) -> bytes:
+        b = bytearray()
+        b.extend(self.afi.to_bytes(2, byteorder="big"))
+        b.extend(self.subtype.to_bytes(1, byteorder="big"))
+        b.extend(self.safi.to_bytes(1, byteorder="big"))
+        return b
+
+    @classmethod
+    def from_bytes(cls, b: bytes) -> RouteRefreshMessage:
+        b = Message.from_bytes(b).payload
+        return cls.from_payload(b)
+
+    @classmethod
+    def from_payload(cls, b: bytes) -> RouteRefreshMessage:
+        afi = int.from_bytes(b[0:2], "big")
+        subtype = int.from_bytes(b[2:3], "big")
+        safi = int.from_bytes(b[3:4], "big")
+        return cls(afi, safi, subtype)
+
+
 class MessageDecoder(object):
     message_types: Mapping[MessageType, Type[Message]]
     path_attribute_types: Mapping[int, Type[PathAttribute]]
     capability_types: Mapping[int, Type[Capability]]
     parameter_types: Mapping[int, Type[Parameter]]
+    nlri_types: Mapping[ProtoTuple, Type[NLRI]]
+    default_afi: AFI = AFI.AFI_IPV4
+    default_safi: SAFI = SAFI.SAFI_UNICAST
 
-    def __init__(self, _decoder: Optional[MessageDecoder]=None,
-                 message_types: Mapping[MessageType, Type[Message]]={},
-                 path_attribute_types: Mapping[int, Type[PathAttribute]]={},
-                 capability_types: Mapping[int, Type[Capability]]={},
-                 parameter_types: Mapping[int, Type[Parameter]]={}):
+    def __init__(self, _decoder: Optional[MessageDecoder] = None,
+                 message_types: Mapping[MessageType, Type[Message]] = {},
+                 path_attribute_types: Mapping[int, Type[PathAttribute]] = {},
+                 capability_types: Mapping[int, Type[Capability]] = {},
+                 parameter_types: Mapping[int, Type[Parameter]] = {},
+                 nlri_types: Mapping[ProtoTuple, Type[NLRI]] = {}):
         self.message_types = {}
         self.path_attribute_types = {}
         self.capability_types = {}
         self.parameter_types = {}
+        self.nlri_types = {}
         if _decoder is not None:
             self.message_types.update(_decoder.message_types)
             self.path_attribute_types.update(_decoder.path_attribute_types)
             self.capability_types.update(_decoder.capability_types)
             self.parameter_types.update(_decoder.parameter_types)
+            self.nlri_types.update(_decoder.nlri_types)
         self.message_types.update(message_types)
         self.path_attribute_types.update(path_attribute_types)
         self.capability_types.update(capability_types)
         self.parameter_types.update(parameter_types)
+        self.nlri_types.update(nlri_types)
 
     def decode_message(self, b: bytes) -> Message:
         msg: Message = Message.from_bytes(b)
@@ -1255,11 +1530,49 @@ class MessageDecoder(object):
         elif isinstance(msg, UpdateMessage):
             msg.path_attributes = list(map(self.coerce_path_attribute,
                                            msg.path_attributes))
+            if msg.nlri_raw is not None:
+                msg.nlri = list(self.decode_nlris(
+                    self.default_afi, self.default_safi, msg.nlri_raw))
+                msg.nlri_raw = None
+            if msg.withdrawn_raw is not None:
+                msg.withdrawn = list(self.decode_nlris(self.default_afi,
+                                                       self.default_safi,
+                                                       msg.withdrawn_raw))
+                msg.withdrawn_raw = None
+            for attr in msg.path_attributes:
+                if isinstance(attr, MultiprotocolReachableNLRI):
+                    if attr.nlri_raw is None:
+                        continue
+                    attr.nlri = list(self.decode_nlris(attr.afi, attr.safi,
+                                                       attr.nlri_raw))
+                    attr.nlri_raw = None
+                elif isinstance(attr, MultiprotocolUnreachableNLRI):
+                    if attr.nlri_raw is None:
+                        continue
+                    attr.nlri = list(self.decode_nlris(attr.afi, attr.safi,
+                                                       attr.nlri_raw))
+                    attr.nlri_raw = None
         elif isinstance(msg, NotificationMessage):
             pass
         elif isinstance(msg, KeepaliveMessage):
             pass
         return msg
+
+    def decode_nlri(self, afi: AFI, safi: SAFI, _b: bytes) -> Tuple[NLRI, int]:
+        """Decodes a packed NLRI value. Requires the corresponding AFI and
+        SAFI values for the lookup in the `nlri_types` object attribute and
+        returns a tuple that consists of a `NLRI` object and the length of the
+        consumed bytes in the input."""
+        if (afi, safi) not in self.nlri_types:
+            return NLRI.from_bytes(afi, safi, _b)
+        return self.nlri_types[afi, safi].from_bytes(afi, safi, _b)
+
+    def decode_nlris(self, afi: AFI, safi: SAFI, _b: bytes) \
+            -> Generator[NLRI, None, None]:
+        while _b:
+            nlri, octets = self.decode_nlri(afi, safi, _b)
+            _b = _b[octets:]
+            yield nlri
 
     def coerce_message(self, m: Message) -> Message:
         if m.type_ in self.message_types:
@@ -1319,6 +1632,38 @@ class MessageDecoder(object):
             return t.type_ in self.capability_types
         return False
 
+    @classmethod
+    def for_capabilities(cls, capabilities: Iterable[Capability],
+                         base_decoder: Optional[MessageDecoder]=None) \
+            -> MessageDecoder:
+        """Creates an instance of a `MessageDecoder` that is suitable for the
+        capability objects (i.e. objects of a subclass of `Capability`) given
+        in the `capabilities` attribute. Creates a new `MessageDecoder`
+        instance from the template given in the `base_decoder` attribute, which
+        should contain a `MessageDecoder` instance.
+
+        If an empty template is desired, then use `MessageDecoder()` as
+        `base_decoder` value.
+
+        This method understands at the moment the `FourOctetASNCapability`
+        and `AddPathCapability` types, where the latter one is usable with
+        Internet protocol AFI values, and unicast and multicast SAFI values."""
+        if base_decoder is None:
+            base_decoder = default_decoder
+        decoder = cls(base_decoder)
+        for cap in capabilities:
+            if isinstance(cap, FourOctetASNCapability):
+                decoder.register_path_attribute_type(AS4PathAttribute)
+                decoder.register_path_attribute_type(Aggregator4Attribute)
+            elif isinstance(cap, AddPathCapability):
+                for afi, safi, send_receive in cap.protos:
+                    if (afi, safi) not in AddPathIPNLRI.protos:
+                        continue
+                    elif not (send_receive & 1):
+                        continue
+                    decoder.nlri_types[afi, safi] = AddPathIPNLRI
+        return decoder
+
 
 async def read_message(reader: asyncio.StreamReader) -> bytes:
     marker = await reader.readexactly(16)
@@ -1337,11 +1682,12 @@ def message_length(message: bytes) -> int:
     return int.from_bytes(message[16:18], byteorder="big")
 
 
-defaultDecoder = MessageDecoder(
+default_decoder = MessageDecoder(
     message_types={MessageType.OPEN: OpenMessage,
                    MessageType.UPDATE: UpdateMessage,
                    MessageType.NOTIFICATION: NotificationMessage,
-                   MessageType.KEEPALIVE: KeepaliveMessage},
+                   MessageType.KEEPALIVE: KeepaliveMessage,
+                   MessageType.ROUTE_REFRESH: RouteRefreshMessage},
     path_attribute_types={
         1: OriginAttribute,
         2: ASPathAttribute,
@@ -1357,48 +1703,67 @@ defaultDecoder = MessageDecoder(
     },
     capability_types={
         1: MultiprotocolCapability,
+        2: RouteRefreshCapability,
+        64: GracefulRestartCapability,
         65: FourOctetASNCapability,
+        69: AddPathCapability,
     },
     parameter_types={
         2: CapabilityParameter,
-    })
-defaultDecoderASN4 = MessageDecoder(
-    defaultDecoder,
+    },
+    nlri_types={
+        (AFI.AFI_IPV4, SAFI.SAFI_UNICAST): IPNLRI,
+        (AFI.AFI_IPV4, SAFI.SAFI_MULTICAST): IPNLRI,
+        (AFI.AFI_IPV6, SAFI.SAFI_UNICAST): IPNLRI,
+        (AFI.AFI_IPV6, SAFI.SAFI_MULTICAST): IPNLRI})
+default_decoder_asn4 = MessageDecoder(
+    default_decoder,
     path_attribute_types={
         2: AS4PathAttribute,
+        7: Aggregator4Attribute,
     })
 
-decode_message = defaultDecoder.decode_message
+decode_message = default_decoder.decode_message
 
 
 __all__ = (
-    "MessageType",
-    "Message",
-    "OpenMessage",
-    "Parameter",
-    "CapabilityParameter",
-    "Capability",
-    "FourOctetASNCapability",
+    "AddPathCapability",
+    "AddPathIPNLRI",
     "AFI",
-    "SAFI",
+    "AggregatorAttribute",
+    "Aggregator4Attribute",
+    "ASPathAttribute",
+    "ASPathSegmentType",
+    "AS4PathAttribute",
+    "AtomicAggregateAttribute",
+    "Capability",
+    "CapabilityParameter",
+    "CommunitiesAttribute",
+    "FourOctetASNCapability",
+    "GracefulRestartCapability",
+    "IPNLRI",
+    "KeepaliveMessage",
+    "LargeCommunitiesAttribute",
+    "LocalPrefAttribute",
+    "Message",
+    "MessageDecoder",
+    "MessageType",
+    "MultiExitDisc",
     "MultiprotocolCapability",
-    "PathAttributes",
     "MultiprotocolReachableNLRI",
     "MultiprotocolUnreachableNLRI",
-    "OriginAttribute",
-    "ASPathSegmentType",
-    "ASPathAttribute",
     "NextHopAttribute",
-    "MultiExitDisc",
-    "LocalPrefAttribute",
-    "AtomicAggregateAttribute",
-    "AggregatorAttribute",
-    "CommunitiesAttribute",
-    "LargeCommunitiesAttribute",
-    "UpdateMessage",
+    "NLRI",
     "NotificationMessage",
-    "KeepaliveMessage",
-    "read_message",
+    "OpenMessage",
+    "OriginAttribute",
+    "Parameter",
+    "PathAttribute",
+    "ProtoTuple",
+    "RouteRefreshCapability",
+    "RouteRefreshMessage",
+    "SAFI",
+    "UpdateMessage",
     "decode_message",
-    "MessageDecoder"
+    "read_message",
 )
