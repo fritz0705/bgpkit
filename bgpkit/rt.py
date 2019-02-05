@@ -96,10 +96,6 @@ class RoutingTable(Generic[T], Mapping[netaddr.IPNetwork, T]):
         net = self._coerce_net(net)
         self._insert_node(net, _Node(net))
 
-    def add(self, net: netaddr.IPNetwork, value: T) -> None:
-        net = self._coerce_net(net)
-        self._insert_node(net, _DataNode(net, value))
-
     def _insert_node(self, net: netaddr.IPNetwork, ins_node: _Node[T]) -> None:
         if net == self._root.net:
             ins_node.children = self._root.children
@@ -220,8 +216,12 @@ class RoutingTable(Generic[T], Mapping[netaddr.IPNetwork, T]):
             nodes[-2].children.remove(node)
             nodes[-2].children.add(new_node)
 
+    def clear(self) -> None:
+        self._root = _Node(self._root.net)
+
     def __setitem__(self, net: netaddr.IPNetwork, val: T) -> None:
-        self.add(net, val)
+        net = self._coerce_net(net)
+        self._insert_node(net, _DataNode(net, value))
 
     def __getitem__(self, net: netaddr.IPNetwork) -> T:
         return self.lookup(net, exact=True)[1]
