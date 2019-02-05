@@ -133,6 +133,12 @@ class OpenMessage(Message):
                 continue
             yield from param.capabilities
 
+    def get_capabilities(self, _t: Type[Capability]) \
+            -> Generator[Capability, None, None]:
+        for cap in self.capabilities():
+            if isinstance(cap, _t):
+                yield cap
+
     def __repr__(self) -> str:
         return f"<OpenMessage version={self.version!r} asn={self.asn!r} " \
             f"hold_time={self.hold_time!r} "\
