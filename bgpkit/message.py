@@ -815,6 +815,21 @@ class ASPathAttribute(PathAttribute):
 
 
 class AS4PathAttribute(ASPathAttribute):
+    type_ = 2
+
+    def __init__(self, *args, type_: int=2, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.type_ = property(self._get_type, self._set_type)
+        self.type_ = type_
+
+    def _get_type(self) -> int:
+        return self._type
+
+    def _set_type(self, type_: int) -> None:
+        if type_ not in {2, 17}:
+            pass
+        self._type = type_
+
     def __repr__(self) -> str:
         return f"<AS4PathAttribute {self.segments!r}>"
 
@@ -838,7 +853,7 @@ class AS4PathAttribute(ASPathAttribute):
     @classmethod
     def from_attribute(cls, attr: PathAttribute) -> AS4PathAttribute:
         b = attr.payload
-        attr = cls(flags=attr.flags)
+        attr = cls(flags=attr.flags, type_=attr.type_)
         while b:
             segment = []
             segment_type = ASPathSegmentType(b[0])
@@ -993,6 +1008,23 @@ class AggregatorAttribute(PathAttribute):
 
 
 class Aggregator4Attribute(AggregatorAttribute):
+    _type: int
+
+    def __init__(self, *args, type_: int=7, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.type_ = type_
+
+    @property
+    def type_(self) -> int:
+        return self._type
+    
+    @type_.setter
+    def type_(self, type_: int) -> None:
+        if type_ not in {7, 18}:
+            # TODO Raise exception
+            pass
+        self._type = type_
+
     @property
     def payload(self) -> bytes:
         b = self.asn.to_bytes(4, byteorder="big")
@@ -1009,7 +1041,8 @@ class Aggregator4Attribute(AggregatorAttribute):
         b = b[4:]
         return cls(asn,
                    netaddr.IPAddress(int.from_bytes(b[0:4], byteorder="big")),
-                   flags=attr.flags)
+                   flags=attr.flags,
+                   type_=attr.type_)
 
 
 class CommunitiesAttribute(PathAttribute):
@@ -1594,6 +1627,8 @@ default_decoder = MessageDecoder(
         8: CommunitiesAttribute,
         14: MultiprotocolReachableNLRI,
         15: MultiprotocolUnreachableNLRI,
+        17: AS4PathAttribute,
+        18: Aggregator4Attribute,
         32: LargeCommunitiesAttribute,
     },
     capability_types={
