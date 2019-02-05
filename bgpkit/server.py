@@ -9,6 +9,8 @@ from bgpkit.rt import *
 from bgpkit.message import *
 from bgpkit.session import *
 
+# TODO Evaluate use of locks
+
 RouterID = Tuple[int, netaddr.IPAddress]
 
 R = TypeVar('R', bound='Route')
@@ -278,6 +280,9 @@ class ServerSession(Session):
     async def on_shutdown(self) -> None:
         pass
 
+    async def on_established(self) -> None:
+        pass
+
 class BGPServer(object):
     peers: RoutingTable[BaseSession]
     sessions_lock: asyncio.Lock
@@ -408,8 +413,16 @@ class BGPServer(object):
         # Now wait for the OPEN message from the other side.
         msg = await read_message(reader)
         msg = session.decode_message(msg)
-        if not isinstance(msg, OpenMessage):
-            pass
+        if isinstance(msg, NotificationMessage):
+            session.last_error = msg
+            writer.close()
+            await writer.wait_closed()
+            return
+        elif not isinstance(msg, OpenMessage):
+            # TODO Answer with appropriate NOTIFICATION message
+            writer.close()
+            await writer.wait_closed()
+            return
         # We have received an OPEN message from the peer side. The next step is
         # to verify this OPEN message if it matches on our configured session.
         # Then, we load the peer information (ASN, Router ID, etc.) to our
@@ -431,23 +444,26 @@ class BGPServer(object):
         # in our server instance.
         async with self.sessions_lock:
             self.sessions[session.peer_id] = session
-        # To change to OpenConfirm state, we have to send a KEEPALIVE message
-        # to our peer. After that, we wait for a KEEPALIVE message from our
-        # peer.
-        msg = KeepaliveMessage()
-        writer.write(msg.to_bytes())
-        session.state = State.OPEN_CONFIRM
-        msg = await read_message(reader)
-        msg = session.decode_message(msg)
-        if not isinstance(msg, KeepaliveMessage):
-            pass
-        # After reception of the KEEPALIVE message from the peer, we change
-        # from the OpenConfirm state to the Established state. Further, we
-        # start the associated session timers.
-        session.state = State.ESTABLISHED
-        session.keepalive_timer.start()
-        session.hold_timer.start()
         try:
+            # To change to OpenConfirm state, we have to send a KEEPALIVE message
+            # to our peer. After that, we wait for a KEEPALIVE message from our
+            # peer.
+            msg = KeepaliveMessage()
+            writer.write(msg.to_bytes())
+            session.state = State.OPEN_CONFIRM
+            msg = await read_message(reader)
+            msg = session.decode_message(msg)
+            if not isinstance(msg, KeepaliveMessage):
+                if isinstance(msg, NotificationMessage):
+                    session.last_error = msg
+                    return
+                # TODO Answer with appropriate NOTIFICATION message
+            # After reception of the KEEPALIVE message from the peer, we change
+            # from the OpenConfirm state to the Established state. Further, we
+            # start the associated session timers.
+            session.state = State.ESTABLISHED
+            session.keepalive_timer.start()
+            session.hold_timer.start()
             while True:
                 msg = await read_message(reader)
                 msg = session.decode_message(msg)
@@ -457,7 +473,8 @@ class BGPServer(object):
             session.last_error = notif.notification
         finally:
             print(f"Shutdown session {session!r}...")
-            await session.on_shutdown()
+            if session.state == State.ESTABLISHED:
+                await session.on_shutdown()
             session.state = State.IDLE
             session.keepalive_timer.stop()
             session.hold_timer.stop()
@@ -488,6 +505,10 @@ class RIB(Generic[T], Mapping[RIBKey, T]):
     @property
     def protos(self) -> FrozenSet[ProtoTuple]:
         return frozenset(self._protos)
+
+    def clear(self) -> None:
+        for rt in self._rts.values():
+            rt.clear()
 
     def register_proto(self, proto: ProtoTuple) -> None:
         if proto in self._protos:
@@ -617,6 +638,13 @@ class RoutingSession(ServerSession):
         async with self.adj_rib_in_lock:
             for route in self.adj_rib_in.values():
                 self.server.loc_rib.remove_set(route)
+        self.adj_rib_in.clear()
+
+    async def on_established(self) -> None:
+        self.adj_rib_in.clear()
+        for route in self.adj_rib_out.values():
+            update = route.update_message()
+            self.writer.write(update.to_bytes())
 
 class RoutingServer(BGPServer):
     sessions: Mapping[RouterID, RoutingSession]
