@@ -308,10 +308,6 @@ class AFI(int):
             raise ValueError("A AFI value must be between 0 and 65535")
         super().__init__()
 
-    @property
-    def is_ip(self):
-        return self == self.AFI_IPV4 or self == self.AFI_IPV6
-
     def __str__(self) -> str:
         return repr(self)
 
@@ -621,51 +617,12 @@ class MultiprotocolReachableNLRI(PathAttribute):
         self.nlri = list(nlri)
         self.nlri_raw = nlri_raw
 
-    @property
-    def ip_routes(self) -> List[netaddr.IPNetwork]:
-        if not self.ip_version:
-            return []
-        routes = []
-        for nlri in self.nlri:
-            if isinstance(nlri, IPNLRI):
-                routes.append(nlri.net)
-        return routes
-
-    @ip_routes.setter
-    def ip_routes(self, routes: List[netaddr.IPNetwork]) -> None:
-        pass
-
-    @property
-    def ip_version(self) -> Optional[int]:
-        if self.afi == AFI.AFI_IPV4:
-            return 4
-        elif self.afi == AFI.AFI_IPV6:
-            return 6
-        return None
-
-    @property
-    def ip_next_hop(self) -> netaddr.IPAddress:
-        if not self.ip_version:
-            return None
-        return netaddr.IPAddress(
-            int.from_bytes(self.next_hop,
-                           byteorder="big"), version=self.ip_version)
-
-    @ip_next_hop.setter
-    def ip_next_hop(self, next_hop: netaddr.IPAddress) -> None:
-        pass
-
     def __repr__(self) -> str:
         if self.nlri_raw is not None:
             return f"<MultiprotocolReachableNLRI afi={self.afi!r} " \
                 f"safi={self.safi!r} " \
                 f"next_hop={self.next_hop!r} " \
                 f"nlri_raw={self.nlri_raw!r}>"
-        if self.afi in {AFI.AFI_IPV4, AFI.AFI_IPV6}:
-            return f"<MultiprotocolReachableNLRI afi={self.afi!r} " \
-                f"safi={self.safi!r} " \
-                f"ip_next_hop={self.ip_next_hop!r} " \
-                f"ip_routes={self.ip_routes!r}>"
         return f"<MultiprotocolReachableNLRI afi={self.afi!r} " \
             f"safi={self.safi!r} " \
             f"next_hop={self.next_hop!r} " \
@@ -719,33 +676,11 @@ class MultiprotocolUnreachableNLRI(PathAttribute):
         self.nlri = list(nlri)
         self.nlri_raw = nlri_raw
 
-    @property
-    def ip_routes(self) -> List[netaddr.IPNetwork]:
-        if not self.ip_version:
-            return []
-        routes = []
-        for nlri in self.nlri:
-            if isinstance(nlri, IPNLRI):
-                routes.append(nlri.net)
-        return routes
-
-    @property
-    def ip_version(self) -> Optional[int]:
-        if self.afi == AFI.AFI_IPV4:
-            return 4
-        elif self.afi == AFI.AFI_IPV6:
-            return 6
-        return None
-
     def __repr__(self) -> str:
         if self.nlri_raw is not None:
             return f"<MultiprotocolUnreachableNLRI afi={self.afi!r} " \
                 f"safi={self.safi!r} " \
                 f"nlri_raw={self.nlri_raw!r}>"
-        if self.afi in {AFI.AFI_IPV4, AFI.AFI_IPV6}:
-            return f"<MultiprotocolUnreachableNLRI afi={self.afi!r} " \
-                f"safi={self.safi!r} " \
-                f"ip_routes={self.ip_routes!r}>"
         return f"<MultiprotocolUnreachableNLRI afi={self.afi!r} " \
             f"safi={self.safi!r} " \
             f"nlri={self.nlri!r}>"
@@ -1258,61 +1193,11 @@ class UpdateMessage(Message):
                  nlri: List[NLRI] = [],
                  nlri_raw: Optional[bytes] = None,
                  withdrawn_raw: Optional[bytes] = None):
-        self.withdrawn = list(withdrawn)
         self.path_attributes = list(path_attributes)
         self.nlri = list(nlri)
         self.nlri_raw = nlri_raw
+        self.withdrawn = list(withdrawn)
         self.withdrawn_raw = withdrawn_raw
-
-    @property
-    def is_empty(self):
-        for _ in self.mp_nlri():
-            break
-        else:
-            return True
-        return False
-
-    @property
-    def ip_nlri(self) -> List[netaddr.IPNetwork]:
-        networks = []
-        for nlri in self.nlri:
-            if isinstance(nlri, IPNLRI):
-                networks.append(nlri.net)
-        return networks
-
-    @property
-    def ip_withdrawn(self) -> List[netaddr.IPNetwork]:
-        networks = []
-        for withdrawn in self.withdrawn:
-            if isinstance(withdrawn, IPNLRI):
-                networks.append(withdrawn)
-        return networks
-
-    def mp_nlri(self, types: Optional[Set[ProtoTuple]] = None) \
-            -> Generator[Tuple[AFI, SAFI, NLRI], None, None]:
-        for nlri in self.nlri:
-            if types is None or (AFI.AFI_IPV4, SAFI.SAFI_UNICAST) in types:
-                yield (AFI.AFI_IPV4, SAFI.SAFI_UNICAST, nlri)
-        for attr in self.path_attributes:
-            if not isinstance(attr, MultiprotocolReachableNLRI):
-                continue
-            if types is not None and (attr.afi, attr.safi) not in types:
-                continue
-            for nlri in attr.nlri:
-                yield (attr.afi, attr.safi, nlri)
-
-    def mp_withdrawn(self, types: Optional[Set[ProtoTuple]] = None) \
-            -> Generator[Tuple[AFI, SAFI, NLRI], None, None]:
-        for nlri in self.withdrawn:
-            if types is None or (AFI.AFI_IPV4, SAFI.SAFI_UNICAST) in types:
-                yield (AFI.AFI_IPV4, SAFI.SAFI_UNICAST, nlri)
-        for attr in self.path_attributes:
-            if not isinstance(attr, MultiprotocolUnreachableNLRI):
-                continue
-            if types is not None and (attr.afi, attr.safi) not in types:
-                continue
-            for nlri in attr.nlri:
-                yield (attr.afi, attr.safi, nlri)
 
     def __repr__(self) -> str:
         s = "<UpdateMessage "
