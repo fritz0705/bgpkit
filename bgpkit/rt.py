@@ -189,7 +189,7 @@ class RoutingTable(Generic[T], Mapping[netaddr.IPNetwork, T]):
         return net.ipv6()
 
     def __iter__(self) -> Generator[netaddr.IPNetwork, None, None]:
-        yield self._root
+        yield self._root.net
         for node in self._root:
             if isinstance(node, _DataNode):
                 yield node.net
@@ -221,7 +221,7 @@ class RoutingTable(Generic[T], Mapping[netaddr.IPNetwork, T]):
 
     def __setitem__(self, net: netaddr.IPNetwork, val: T) -> None:
         net = self._coerce_net(net)
-        self._insert_node(net, _DataNode(net, value))
+        self._insert_node(net, _DataNode(net, val))
 
     def __getitem__(self, net: netaddr.IPNetwork) -> T:
         return self.lookup(net, exact=True)[1]
