@@ -1446,6 +1446,8 @@ class MessageDecoder(object):
         self.nlri_types.update(nlri_types)
 
     def decode_message(self, b: bytes) -> Message:
+        if not is_full_message(b):
+            raise ValueError("BGP Message too short")
         msg: Message = Message.from_bytes(b)
         msg = self.coerce_message(msg)
         if isinstance(msg, OpenMessage):
