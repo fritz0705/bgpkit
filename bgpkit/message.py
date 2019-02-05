@@ -716,6 +716,10 @@ class MultiprotocolUnreachableNLRI(PathAttribute):
         return cls(afi, safi, nlri_raw=b[3:], flags=attr.flags)
 
 
+ORIGIN_IGP = 0
+ORIGIN_EGP = 1
+ORIGIN_INCOMPLETE = 2
+
 class OriginAttribute(PathAttribute):
     type_ = 1
 
