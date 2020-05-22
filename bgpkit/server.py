@@ -543,6 +543,7 @@ class BGPServer(object):
             # from the OpenConfirm state to the Established state. Further, we
             # start the associated session timers.
             session.state = State.ESTABLISHED
+            await session.on_established()
             session.keepalive_timer.start()
             session.hold_timer.start()
             while True:
