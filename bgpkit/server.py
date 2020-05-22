@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import enum
 from typing import *
 
 import netaddr
@@ -11,42 +12,76 @@ from bgpkit.session import *
 
 # TODO Evaluate use of locks
 
-RouterID = Tuple[int, netaddr.IPAddress]
-
 R = TypeVar('R', bound='Route')
+P = TypeVar('P', bound=PathAttribute)
 
 class ASPathView(object):
-    pass
+    _attribute: ASPathAttribute
 
-class CommunitiesView(object):
-    pass
+    def __init__(self, attribute):
+        self._attribute = attribute
 
-class LargeCommunitiesView(object):
-    pass
+    def __iter__(self) -> Generator[int, None, None]:
+        for segment in self._attribute.segments:
+            for entry in segment:
+                yield entry
 
-P = TypeVar('P', bound=PathAttribute)
+    def __contains__(self, asn: int) -> bool:
+        for entry in self:
+            if asn == entry:
+                return True
+        return False
+
+    def append(self, asn: int) -> None:
+        pass
+
+    def add(self, asn: int) -> None:
+        pass
+
+    def remove(self, asn: int) -> None:
+        pass
+
+    def clear(self) -> None:
+        self._attribute.segments = []
+
+class RouteAction(enum.Enum):
+    ANNOUNCE = 1
+    WITHDRAW = 2
 
 class Route(object):
     afi: AFI
     safi: SAFI
     nlri: NLRI
     attributes: Set[PathAttribute]
-    session: Optional[BaseSession]
+    source_router: Optional[RouterID]
 
     def __init__(self, afi: int, safi: int, nlri: NLRI,
-            attributes: Set[PathAttribute]) -> None:
+            attributes: Set[PathAttribute],
+            source_router: Optional[RouterID]=None) -> None:
         self.afi = AFI(afi)
         self.safi = SAFI(safi)
         self.nlri = nlri
-        self.attributes = attributes
+        self.attributes = frozenset(attributes)
+        self.source_router = source_router
+
+    def copy(self) -> Route:
+        return Route(self.afi, self.safi, self.nlri, self.attributes,
+                self.source_router)
+
+    def __hash__(self) -> int:
+        return hash(self.afi) ^ hash (self.safi) ^ hash(self.nlri) ^ hash(self.source_router) ^ hash(Route) ^ hash(self.attributes)
+
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, Route):
+            return False
+        return other.afi == self.afi and other.safi == self.safi and \
+                other.nlri == self.nlri and \
+                other.attributes == self.attributes and \
+                other.source_router == self.source_router
 
     @property
     def proto(self) -> ProtoTuple:
         return self.afi, self.safi
-
-    @property
-    def as_path(self) -> ASPathView:
-        pass
 
     @property
     def aggregator(self) -> Optional[RouterID]:
@@ -80,14 +115,6 @@ class Route(object):
         raise TypeError('Protocol {self.proto!r} doesn\'t support `next_hop` attribute')
 
     @property
-    def communities(self) -> CommunitiesView:
-        pass
-
-    @property
-    def large_communities(self) -> LargeCommunitiesView:
-        pass
-
-    @property
     def local_pref(self) -> Optional[int]:
         a = self._get_by_type(LocalPrefAttribute)
         if a is not None:
@@ -109,8 +136,11 @@ class Route(object):
     def __repr__(self) -> str:
         local_pref = self.local_pref
         aggregator = self.aggregator
+        source_router = self.source_router
         med = self.med
         s = f"<Route afi={self.afi!r} safi={self.safi!r} {self.nlri!r}"
+        if source_router is not None:
+            s += f" source_router={source_router!r}"
         if local_pref is not None:
             s += f" local_pref={local_pref!r}"
         if aggregator is not None:
@@ -132,15 +162,15 @@ class Route(object):
             else:
                 attrs.add(attr)
         for nlri in update.nlri:
-            yield cls(AFI.AFI_IPV4, SAFI.SAFI_UNICAST, nlri, attrs)
+            yield RouteAction.ANNOUNCE, cls(AFI.AFI_IPV4, SAFI.SAFI_UNICAST, nlri, attrs)
         for withdrawn in update.withdrawn:
-            pass
+            yield RouteAction.WITHDRAW, cls(AFI.AFI_IPV4, SAFI.SAFI_UNICAST, nlri, attrs)
         for mpreach in mpreachs:
             for nlri in mpreach.nlri:
-                yield cls(mpreach.afi, mpreach.safi, nlri, attrs | {mpreach})
+                yield RouteAction.ANNOUNCE, cls(mpreach.afi, mpreach.safi, nlri, attrs | {mpreach})
         for mpunreach in mpunreachs:
             for nlri in mpunreach.nlri:
-                pass
+                yield RouteAction.WITHDRAW, cls(mpreach.afi, mpreach.safi, nlri, attrs | {mpreach})
 
 # High-level timer, maybe replace by low-level asyncio timer?
 class Timer(object):
@@ -190,6 +220,9 @@ class Timer(object):
     async def _run(self) -> Any:
         await asyncio.sleep(self.delta)
         if self.callback is not None:
+            # Some reflection to call coroutines when the Timer fires
+            if asyncio.iscoroutinefunction(self.callback):
+                return await self.callback(self)
             return self.callback(self)
 
 class NotificationException(Exception):
@@ -244,18 +277,19 @@ class ServerSession(Session):
         self.connect_retry_timer = Timer(self.connect_retry_time,
                 self.connect_retry_callback)
 
-    def hold_callback(self, timer):
+    async def hold_callback(self, timer):
         if self.state != State.ESTABLISHED:
             return
         self.reader_task.cancel()
         notif_msg = None
         self.writer.write(notif_msg.to_bytes())
 
-    def keepalive_callback(self, timer):
+    async def keepalive_callback(self, timer):
         if self.state != State.ESTABLISHED:
             return
         msg = KeepaliveMessage()
         self.writer.write(msg.to_bytes())
+        await self.writer.drain()
         timer.start()
 
     def connect_retry_callback(self, timer):
@@ -267,9 +301,13 @@ class ServerSession(Session):
         self.server.open_connection(self, self.peername[0], self.peername[1])
         timer.start()
 
-    def load_peer_data(self, msg: bgpkit.message.OpenMessage) -> None:
+    def load_peer_data(self, msg: OpenMessage) -> None:
         super().load_peer_data(msg)
         self.create_timers()
+
+    def close(self, notification: NotificationMessage) -> None:
+        self.writer.write(notification.to_bytes())
+        self.reader_task.cancel()
 
     async def on_update(self, update: UpdateMessage) -> None:
         print(update)
@@ -282,6 +320,21 @@ class ServerSession(Session):
 
     async def on_established(self) -> None:
         pass
+
+    async def on_notification(self, notification: NotificationMessage) -> None:
+        pass
+
+    @property
+    def initiator_router_id(self) -> Optional[netaddr.IPNetwork]:
+        if self.active:
+            return self.local_router_id
+        return self.peer_router_id
+    
+    @property
+    def initiator_asn(self) -> Optional[int]:
+        if self.active:
+            return self.local_asn
+        return self.peer_asn
 
 class BGPServer(object):
     peers: RoutingTable[BaseSession]
@@ -309,9 +362,7 @@ class BGPServer(object):
 
     def start(self) -> None:
         for peer in self.peers.values():
-            print(peer)
             if isinstance(peer, ServerSession) and peer.active:
-                print(f"Start peer {peer!r}")
                 peer.connect_retry_timer.force_start()
 
     def stop(self) -> None:
@@ -365,6 +416,7 @@ class BGPServer(object):
         session.writer = writer
         session.reader_task = asyncio.current_task()
         session.peername = peername
+        session.active = False
         try:
             base_session.connect_retry_timer.force_stop()
             # Run session
@@ -379,8 +431,25 @@ class BGPServer(object):
             return
         async with self.sessions_lock:
             other_session = self.sessions[session.peer_id]
+        if other_session.state == State.ESTABLISHED:
+            # Send CEASE error
+            raise NotificationException(NotificationMessage(6))
         if other_session.state != State.OPEN_CONFIRM:
             return
+        if session.initiator_router_id > other_session.initiator_router_id:
+            # Destroy other session
+            return other_session.close(NotificationMessage(6))
+        elif session.initiator_router_id < other_session.initiator_router_id:
+            # Destroy this session
+            raise NotificationException(NotificationMessage(6))
+        # In this case, session.initiator_router_id = other_session.init_rtr_id
+        if session.initiator_asn > other_session.initiator_asn:
+            # Destroy other session
+            return other_session.close(NotificationMessage(6))
+        elif session.initiator_asn > other_session.initiator_asn:
+            # Destroy this session
+            raise NotificationException(NotificationMessage(6))
+        
 
     async def handle_message(self, session: ServerSession,
             msg: Message) -> None:
@@ -395,6 +464,7 @@ class BGPServer(object):
             await session.on_route_refresh(msg)
         elif isinstance(msg, NotificationMessage):
             # TODO Implement proper handling of NOTIFICATION message
+            await session.on_notification(msg)
             session.last_error = msg
             return
         elif isinstance(msg, OpenMessage):
@@ -407,13 +477,23 @@ class BGPServer(object):
         # We are, right now, in the Active state, which means that we haven't
         # sent an OPEN message. To change to OpenSent state, we have to
         # construct an OPEN message and send it to our peer.
+        if session.state != State.ACTIVE:
+            # TODO Handle this case
+            pass
         msg = session.make_open_message()
         writer.write(msg.to_bytes())
+        # Wait until we have really sent the OPEN message
+        await writer.drain()
         session.state = State.OPEN_SENT
         # Now wait for the OPEN message from the other side.
         msg = await read_message(reader)
         msg = session.decode_message(msg)
         if isinstance(msg, NotificationMessage):
+            # We received a NotificationMessage.  This means that the remote
+            # side does not want to establish a BGP session with us.  The
+            # reason is encoded in the received NotificationMessage object.
+            # For further handling we put this NotificationMessage into the
+            # last_error attribute of the session object.
             session.last_error = msg
             writer.close()
             await writer.wait_closed()
@@ -440,7 +520,7 @@ class BGPServer(object):
             writer.write(notif.to_bytes())
             await writer.wait_closed()
             return
-        # If we resolved the collision, then we register the current session
+        # When we resolved the collision, we register the current session
         # in our server instance.
         async with self.sessions_lock:
             self.sessions[session.peer_id] = session
@@ -450,6 +530,7 @@ class BGPServer(object):
             # peer.
             msg = KeepaliveMessage()
             writer.write(msg.to_bytes())
+            await writer.drain()
             session.state = State.OPEN_CONFIRM
             msg = await read_message(reader)
             msg = session.decode_message(msg)
@@ -471,13 +552,29 @@ class BGPServer(object):
         except NotificationException as notif:
             writer.write(notif.to_bytes())
             session.last_error = notif.notification
+        except asyncio.IncompleteReadError:
+            # This happens when the peer closes the connection before we are
+            # done with reading a complete message.
+            pass
+        except CancelledError:
+            # The session has been cancelled, but we have to 
+            raise
         finally:
-            print(f"Shutdown session {session!r}...")
+            # If the session was in Established state, then we call the
+            # session.on_shutdown hook to allow the session to withdraw routes
+            # from the loc_rib.
             if session.state == State.ESTABLISHED:
-                await session.on_shutdown()
+                try:
+                    await session.on_shutdown()
+                except:
+                    # Ignore exceptions in on_shutdown, since the session is
+                    # dying anyway.
+                    pass
             session.state = State.IDLE
+            # Stop the associated connection timers
             session.keepalive_timer.stop()
             session.hold_timer.stop()
+            # Remove session from session dictionary
             async with self.sessions_lock:
                 del self.sessions[session.peer_id]
             writer.close()
@@ -547,14 +644,15 @@ class RIB(Generic[T], Mapping[RIBKey, T]):
             return
         del self[route.afi, route.safi, route.nlri.net]
 
-    def remove_set(self, route: Route) -> None:
+    def remove_set(self: RIB[Set[T]], route: Route) -> None:
         if (route.afi, route.safi, route.nlri.net) not in self:
             return
         self[route.afi, route.safi, route.nlri.net].remove(route)
 
     def __setitem__(self, key: RIBKey,
             value: T) -> None:
-        self._rts[key[0], key[1]][key[2]] = value
+        afi, safi, route = key
+        self._rts[afi, safi][route] = value
 
     def __getitem__(self, key: RIBKey) -> T:
         return self._rts[key[0], key[1]][key[2]]
@@ -609,30 +707,56 @@ class RoutingSession(ServerSession):
         super().load_peer_data(msg)
         self.adj_rib_in.register_protos(self.common_protocols)
 
+    def announce(self, route: Route, apply_filter=True) -> None:
+        if apply_filter and not self.filter_out(route):
+            return
+        self.adj_rib_out.add(route)
+        if self.state == State.ESTABLISHED:
+            update = route.update_message()
+            self.writer.write(update)
+
+    def withdraw(self, route: Route) -> None:
+        if self.state == State.ESTABLISHED and route in self.adj_rib_out:
+            update = route.withdraw_update_message()
+            self.writer.write(update)
+        self.adj_rib_out.remove(route)
+
     async def on_update(self, update: UpdateMessage) -> None:
         routes = []
+        # First we collect the routes from the update message `update`
         for route in Route.from_update(update):
             # If we do not support the AFI-SAFI-tuple of the received route,
             # then this is clearly a protocol violation, and we close the
             # session with a NOTIFICATION message.
             if route.proto not in self.common_protocols:
-                # TODO Fix notification exception
-                raise NotificationException(KeepaliveMessage())
-            route.session = self
+                raise NotificationException(NotificationMessage(3, 9))
+            route.source_router = self.peer_id
             routes.append(route)
-            #print(route)
+        # Then we add the routes to adj_rib_in
         async with self.adj_rib_in_lock:
-            for route in routes:
-                self.adj_rib_in.add(route)
+            for action, route in routes:
+                if action == RouteAction.ANNOUNCE:
+                    self.adj_rib_in.add(route)
+                elif action == RouteAction.WITHDRAW:
+                    self.adj_rib_in.remove(route)
+        # After importing the routes to adj_rib_in, we merge adj_rib_in into
+        # the server RIB
         async with self.server.loc_rib_lock:
-            for route in routes:
-                if self.filter_in(route):
+            for action, route in routes:
+                if action == RouteAction.ANNOUNCE and self.filter_in(route):
                     self.server.loc_rib.add_set(route)
-        # TODO Handle withdrawn routes
+                elif action == RouteAction.WITHDRAW:
+                    self.server.loc_rib.remove_set(route)
 
     async def on_route_refresh(self, route_refresh: RouteRefreshMessage) -> None:
-        # TODO Implement route refresh handling
-        pass
+        for route in self.adj_rib_out.values():
+            if route.afi != route_refresh.afi \
+                    or route.safi != route_refresh.safi:
+                continue
+            update = route.update_message()
+            self.writer.write(update.to_bytes())
+        self.writer.write(UpdateMessage())
+        await self.writer.drain()
 
     async def on_shutdown(self) -> None:
         async with self.adj_rib_in_lock:
@@ -645,6 +769,7 @@ class RoutingSession(ServerSession):
         for route in self.adj_rib_out.values():
             update = route.update_message()
             self.writer.write(update.to_bytes())
+            await self.writer.drain()
 
 class RoutingServer(BGPServer):
     sessions: Mapping[RouterID, RoutingSession]

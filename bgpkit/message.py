@@ -45,6 +45,7 @@ class MessageType(int):
         return f"MessageType({int(self)!r})"
 
 
+# Initialize previously declared message types
 MessageType.UNKNOWN = MessageType(0)
 MessageType.OPEN = MessageType(1)
 MessageType.UPDATE = MessageType(2)
@@ -592,6 +593,14 @@ class PathAttribute(object):
             f"flags={self.flag_code} " \
             f"payload={self.payload!r}>"
 
+    def __hash__(self) -> int:
+        return hash(self.payload) ^ hash(PathAttribute)
+
+    def __eq__(self, other: Any) -> bool:
+        if not isinstance(other, PathAttribute):
+            return False
+        return self.payload == other.payload
+
     @classmethod
     def from_bytes(cls, b: bytes) -> PathAttribute:
         attr = cls(b[0], b[1])
@@ -780,6 +789,7 @@ class ASPathAttribute(PathAttribute):
     @property
     def payload(self) -> bytes:
         b = bytearray()
+        # TODO Implement automatic splitting of segments
         for segment in self.segments:
             segment_type = ASPathSegmentType.AS_SET \
                 if isinstance(segment, set) \
@@ -1596,6 +1606,12 @@ class MessageDecoder(object):
 
 
 async def read_message(reader: asyncio.StreamReader) -> bytes:
+    """Asynchronously read and return message by the following procedure:
+
+    1. Read marker of 16 bytes.
+    2. Read and decode length of 2 bytes.
+    3. Read message type of 1 byte.
+    4. Read remaining message body."""
     marker = await reader.readexactly(16)
     length = await reader.readexactly(2)
     length_ = int.from_bytes(length, byteorder='big')

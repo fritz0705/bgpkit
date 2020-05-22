@@ -26,22 +26,71 @@ class State(enum.Enum):
 
 ProtoTuple = bgpkit.message.ProtoTuple
 
+RouterID = Tuple[int, netaddr.IPAddress]
 S = TypeVar('S', bound='BaseSession')
 
 class BaseSession(ABC):
+    """Abstraction for a concrete implementation of a BGP session. Provides a
+    basic constructor together with some basic state information.
+
+    :params _sess: Session object that acts as a template for the new session
+    instance.
+    :params state: Initial session state.
+    :params local_router_id: Optional router ID of the local side.
+    :params local_as: Optional AS number of the local side.
+    :params local_capabilities: Optional set of locally supported capabilities.
+    :params peer_router_id: Optional router ID of the peer side.
+    :params peer_as: Optional AS number of the peer side.
+    :params peer_capabilities: Optional set of supported capabilities of the
+    peer.
+    :params hold_time: Hold time in seconds.
+    :params connect_retry_time: Connect retry time in seconds.
+    :params connect_retry_counter: Connect retry counter.
+    :params keepalive_time: Keepalive time in seconds.
+    :params decoder: Optional decoder object to be used to decode incoming
+    messages.
+    """
+
     state: State
+    """State of the BGP session."""
+
     local_router_id: Optional[netaddr.IPAddress]
+    """Optional router ID of the local side."""
+
     local_as: Optional[int]
+    """Optional AS number of the local side."""
+
     local_capabilities: Set[bgpkit.message.Capability]
+    """Set of supported capabilities of the local side."""
+
     peer_router_id: Optional[netaddr.IPAddress]
+    """Router ID of the peer side."""
+
     peer_as: Optional[int]
+    """Router AS number of the peer side."""
+
     peer_capabilities: Set[bgpkit.message.Capability]
+    """Set of supported capabilities of the peer side."""
+
     hold_time: int
+    """Hold time in seconds. If the local side does not receive a keepalive
+    message within the hold time, the local side closes the BGP session."""
+
     connect_retry_time: int
+    """Connect retry time in seconds. When the session is shutdown by an error,
+    wait the connect retry time until reconnecting."""
+
     connect_retry_counter: int
+    """The number of reconnection tries."""
+
     keepalive_time: int
+    """The number of seconds between two keepalive messages."""
+
     decoder: bgpkit.message.MessageDecoder
+    """Message decoder instance that is used to decode incoming messages."""
+
     last_error: NotificationMessage
+    """Last error received from the peer side."""
 
     def __init__(self, _sess: Optional[BaseSession]=None,
             state: State=State.IDLE,
@@ -77,6 +126,10 @@ class BaseSession(ABC):
             self.update(_sess)
 
     def update(self, _sess: BaseSession) -> None:
+        """Load the attributes of a template, given as a session object, into
+        the object, if available in the template.
+
+        :param _sess: Session object to be used as a template."""
         self.state = _sess.state
         if _sess.local_router_id is not None:
             self.local_router_id = _sess.local_router_id
@@ -108,6 +161,8 @@ class BaseSession(ABC):
 
     @property
     def peer_id(self) -> Optional[RouterID]:
+        """Full identity of the peer that consists of the peer AS number
+        and peer router ID."""
         if self.peer_as is not None or self.peer_router_id is not None:
             return self.peer_as, self.peer_router_id
         return None
@@ -128,8 +183,14 @@ class BaseSession(ABC):
 
 
 class Session(BaseSession):
+    """A basic BGP session implementation with ASN4 support and callbacks for
+    messages."""
+
     peer_address: Any
+    """The address of the peer side."""
+
     local_address: Any
+    """The address of the local side."""
 
     @property
     def common_capabilities(self) -> Set[bgpkit.message.Capability]:
@@ -220,7 +281,9 @@ class Session(BaseSession):
         the session attributes `peer_capabilities`, `peer_router_id`, and
         `peer_as` from the data contained in the OPEN message. Furthermore,
         this replaces the session-specific decoder by an appropriate decoder
-        for the common session capabilities."""
+        for the common session capabilities.
+
+        :params msg: Instance of the OPEN message."""
         self.peer_capabilities = set(msg.capabilities())
         self.peer_router_id = msg.router_id
         self.peer_as = msg.asn
@@ -235,7 +298,9 @@ class Session(BaseSession):
     def decode_message(self, _b: bytes) -> bgpkit.message.Message:
         """Decodes a message given as a bytes-like object by using the
         session-specific BGP message decoder. Returns a
-        `bgpkit.message.Message` object."""
+        `bgpkit.message.Message` object.
+
+        :params _b: Message object as a bytes-like object."""
         return self.decoder.decode_message(_b)
 
     def make_open_message(self) -> bgpkit.message.OpenMessage:
@@ -257,6 +322,7 @@ class Session(BaseSession):
 __all__ = (
     "AS_TRANS",
     "BaseSession",
+    "RouterID",
     "Session",
     "State"
 )
