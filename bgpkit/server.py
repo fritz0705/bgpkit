@@ -556,7 +556,7 @@ class BGPServer(object):
             # This happens when the peer closes the connection before we are
             # done with reading a complete message.
             pass
-        except CancelledError:
+        except asyncio.CancelledError:
             # The session has been cancelled, but we have to 
             raise
         finally:
@@ -724,14 +724,14 @@ class RoutingSession(ServerSession):
     async def on_update(self, update: UpdateMessage) -> None:
         routes = []
         # First we collect the routes from the update message `update`
-        for route in Route.from_update(update):
+        for action, route in Route.from_update(update):
             # If we do not support the AFI-SAFI-tuple of the received route,
             # then this is clearly a protocol violation, and we close the
             # session with a NOTIFICATION message.
             if route.proto not in self.common_protocols:
                 raise NotificationException(NotificationMessage(3, 9))
             route.source_router = self.peer_id
-            routes.append(route)
+            routes.append((action, route))
         # Then we add the routes to adj_rib_in
         async with self.adj_rib_in_lock:
             for action, route in routes:
