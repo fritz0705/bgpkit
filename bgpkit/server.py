@@ -80,6 +80,10 @@ class Route(object):
                 other.source_router == self.source_router
 
     @property
+    def rib_key(self):
+        return self.afi, self.safi, self.nlri.net
+
+    @property
     def proto(self) -> ProtoTuple:
         return self.afi, self.safi
 
@@ -678,7 +682,7 @@ class RIB(Generic[T], Mapping[RIBKey, T]):
     def __contains__(self, key: RIBKey) -> bool:
         if (key[0], key[1]) not in self._rts:
             return False
-        return key[2] in self._rts
+        return key[2] in self._rts[key[0], key[1]]
 
     def __iter__(self) -> Generator[RIBKey, None, None]:
         for afi, safi in self._protos:
