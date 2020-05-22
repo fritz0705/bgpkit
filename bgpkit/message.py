@@ -1198,7 +1198,7 @@ class IPNLRI(NLRI):
 
     @property
     def payload(self) -> bytes:
-        return self.net.packed[:nlri_octets(self.length)]
+        return self.net[0].packed[:nlri_octets(self.length)]
 
     @property
     def length(self) -> int:
