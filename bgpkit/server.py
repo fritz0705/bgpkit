@@ -589,7 +589,7 @@ def accept_all_filter(route):
 def reject_all_filter(route):
     return False
 
-RIBKey = Tuple[AFI, SAFI, NLRI]
+RIBKey = Tuple[AFI, SAFI, netaddr.IPNetwork]
 T = TypeVar('T')
 
 class RIB(Generic[T], Mapping[RIBKey, T]):
@@ -629,40 +629,40 @@ class RIB(Generic[T], Mapping[RIBKey, T]):
             raise ValueError(f'Protocol {route.proto} not supported.')
         if not isinstance(route.nlri, IPNLRI):
             raise ValueError(f'Non-IP routes not supported.')
-        self[route.afi, route.safi, route.nlri] = route
+        self[route.afi, route.safi, route.nlri.net] = route
 
     def add_value(self, route: Route, value: T) -> None:
         if route.proto not in self._protos:
             raise ValueError(f'Protocol {route.proto} not supported.')
         if not isinstance(route.nlri, IPNLRI):
             raise ValueError(f'Non-IP routes not supported.')
-        self[route.afi, route.safi, route.nlri] = value
+        self[route.afi, route.safi, route.nlri.net] = value
 
     def add_set(self: RIB[Set[T]], route: Route) -> None:
         if route.proto not in self._protos:
             raise ValueError(f'Protocol {route.proto} not supported.')
         if not isinstance(route.nlri, IPNLRI):
             raise ValueError(f'Non-IP routes not supported.')
-        if (route.afi, route.safi, route.nlri) not in self:
-            self[route.afi, route.safi, route.nlri] = set()
-        self[route.afi, route.safi, route.nlri].add(route)
+        if (route.afi, route.safi, route.nlri.net) not in self:
+            self[route.afi, route.safi, route.nlri.net] = set()
+        self[route.afi, route.safi, route.nlri.net].add(route)
 
     def get_value(self, route: Route) -> T:
         if route.proto not in self._protos:
             raise ValueError(f'Protocol {route.proto} not supported.')
         if not isinstance(route.nlri, IPNLRI):
             raise ValueError(f'Non-IP routes not supported.')
-        return self[route.afi, route.safi, route.nlri]
+        return self[route.afi, route.safi, route.nlri.net]
 
     def remove(self, route: Route) -> None:
-        if (route.afi, route.safi, route.nlri) not in self:
+        if (route.afi, route.safi, route.nlri.net) not in self:
             return
-        del self[route.afi, route.safi, route.nlri]
+        del self[route.afi, route.safi, route.nlri.net]
 
     def remove_set(self: RIB[Set[T]], route: Route) -> None:
-        if (route.afi, route.safi, route.nlri) not in self:
+        if (route.afi, route.safi, route.nlri.net) not in self:
             return
-        self[route.afi, route.safi, route.nlri].remove(route)
+        self[route.afi, route.safi, route.nlri.net].remove(route)
 
     def __setitem__(self, key: RIBKey,
             value: T) -> None:
