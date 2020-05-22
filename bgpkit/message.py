@@ -1175,6 +1175,14 @@ class NLRI(object):
     def to_bytes(self) -> bytes:
         return self.length.to_bytes(1, "big") + self.payload
 
+    def __eq__(self, other):
+        if not isinstance(other, NLRI):
+            raise NotImplemented
+        return self.payload == other.payload
+
+    def __hash__(self):
+        return hash(self.payload) ^ hash(NLRI)
+
     @classmethod
     def from_bytes(cls, afi: AFI, safi: SAFI, b: bytes) -> Tuple[NLRI, int]:
         octets = nlri_octets(b[0])
@@ -1497,6 +1505,9 @@ class MessageDecoder(object):
         elif isinstance(msg, KeepaliveMessage):
             pass
         return msg
+
+    def decode_path_attribute(self, b: bytes) -> PathAttribute:
+        return self.coerce_path_attribute(PathAttribute.from_bytes(b))
 
     def decode_nlri(self, afi: AFI, safi: SAFI, _b: bytes) -> Tuple[NLRI, int]:
         """Decodes a packed NLRI value. Requires the corresponding AFI and
