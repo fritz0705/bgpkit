@@ -27,6 +27,7 @@ class _Node(Generic[T]):
         return item
 
     def lookup_chain(self, net: netaddr.IPNetwork) -> Generator[_Node[T], None, None]:
+        yield self
         node = self
         while node.net != net:
             for child in node.children:
@@ -40,7 +41,6 @@ class _Node(Generic[T]):
     def __iter__(self) -> Generator[_Node[T], None, None]:
         yield self
         for child in self.children:
-            yield child
             yield from iter(child)
 
     def __repr__(self) -> str:
@@ -146,10 +146,10 @@ class RoutingTable(Generic[T], Mapping[netaddr.IPNetwork, T]):
                     rep_node.children.add(child)
         else:
             # If the best matching node has at least one child, the split
-            # length is determined, and the split length is less than the
-            # prefix length of the network to insert, we create a node with
+            # length is determined, and if the split length is less than the
+            # prefix length of the network to insert, then we create a node with
             # prefix length equal to the split length, the split node
-            # `spl_node`, and group the children of `node`, to satisfy the
+            # `spl_node`, and group the children of `node` to satisfy the
             # trie condition.
             spl_node: _Node[T] = _Node(net.supernet(split_len)[0])
             # First, we add the `ins_node` node to the split node.
@@ -189,7 +189,8 @@ class RoutingTable(Generic[T], Mapping[netaddr.IPNetwork, T]):
         return net.ipv6()
 
     def __iter__(self) -> Generator[netaddr.IPNetwork, None, None]:
-        yield self._root.net
+        if isinstance(self._root, _DataNode):
+            yield self._root.net
         for node in self._root:
             if isinstance(node, _DataNode):
                 yield node.net
