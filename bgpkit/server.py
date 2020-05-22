@@ -170,7 +170,7 @@ class Route(object):
                 yield RouteAction.ANNOUNCE, cls(mpreach.afi, mpreach.safi, nlri, attrs | {mpreach})
         for mpunreach in mpunreachs:
             for nlri in mpunreach.nlri:
-                yield RouteAction.WITHDRAW, cls(mpreach.afi, mpreach.safi, nlri, attrs | {mpreach})
+                yield RouteAction.WITHDRAW, cls(mpreach.afi, mpreach.safi, nlri, attrs | {mpunreach})
 
 # High-level timer, maybe replace by low-level asyncio timer?
 class Timer(object):
@@ -630,6 +630,13 @@ class RIB(Generic[T], Mapping[RIBKey, T]):
             raise ValueError(f'Non-IP routes not supported.')
         self[route.afi, route.safi, route.nlri.net] = route
 
+    def add_value(self, route: Route, value: T) -> None:
+        if route.proto not in self._protos:
+            raise ValueError(f'Protocol {route.proto} not supported.')
+        if not isinstance(route.nlri, IPNLRI):
+            raise ValueError(f'Non-IP routes not supported.')
+        self[route.afi, route.safi, route.nlri.net] = value
+
     def add_set(self: RIB[Set[T]], route: Route) -> None:
         if route.proto not in self._protos:
             raise ValueError(f'Protocol {route.proto} not supported.')
@@ -638,6 +645,13 @@ class RIB(Generic[T], Mapping[RIBKey, T]):
         if (route.afi, route.safi, route.nlri.net) not in self:
             self[route.afi, route.safi, route.nlri.net] = set()
         self[route.afi, route.safi, route.nlri.net].add(route)
+
+    def get_value(self, route: Route) -> T:
+        if route.proto not in self._protos:
+            raise ValueError(f'Protocol {route.proto} not supported.')
+        if not isinstance(route.nlri, IPNLRI):
+            raise ValueError(f'Non-IP routes not supported.')
+        return self[route.afi, route.safi, route.nlri.net]
 
     def remove(self, route: Route) -> None:
         if (route.afi, route.safi, route.nlri.net) not in self:
