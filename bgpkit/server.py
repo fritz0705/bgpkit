@@ -164,7 +164,7 @@ class Route(object):
         for nlri in update.nlri:
             yield RouteAction.ANNOUNCE, cls(AFI.AFI_IPV4, SAFI.SAFI_UNICAST, nlri, attrs)
         for withdrawn in update.withdrawn:
-            yield RouteAction.WITHDRAW, cls(AFI.AFI_IPV4, SAFI.SAFI_UNICAST, nlri, attrs)
+            yield RouteAction.WITHDRAW, cls(AFI.AFI_IPV4, SAFI.SAFI_UNICAST, withdrawn, attrs)
         for mpreach in mpreachs:
             for nlri in mpreach.nlri:
                 yield RouteAction.ANNOUNCE, cls(mpreach.afi, mpreach.safi, nlri, attrs | {mpreach})
@@ -800,4 +800,4 @@ class RoutingServer(BGPServer):
         return session.copy(RoutingSession, **kwargs)
 
 __all__ = ('BGPServer', 'ServerSession', 'RoutingSession', 'RoutingServer',
-        'RIB')
+        'RIB', 'Route')
