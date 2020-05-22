@@ -174,7 +174,7 @@ class Route(object):
                 yield RouteAction.ANNOUNCE, cls(mpreach.afi, mpreach.safi, nlri, attrs | {mpreach})
         for mpunreach in mpunreachs:
             for nlri in mpunreach.nlri:
-                yield RouteAction.WITHDRAW, cls(mpreach.afi, mpreach.safi, nlri, attrs | {mpunreach})
+                yield RouteAction.WITHDRAW, cls(mpunreach.afi, mpunreach.safi, nlri, attrs | {mpunreach})
 
 # High-level timer, maybe replace by low-level asyncio timer?
 class Timer(object):
