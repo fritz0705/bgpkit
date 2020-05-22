@@ -594,7 +594,7 @@ class PathAttribute(object):
             f"payload={self.payload!r}>"
 
     def __hash__(self) -> int:
-        return hash(self.payload) ^ hash(PathAttribute)
+        return hash(bytes(self.payload)) ^ hash(PathAttribute)
 
     def __eq__(self, other: Any) -> bool:
         if not isinstance(other, PathAttribute):
